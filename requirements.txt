@@ -12,3 +12,4 @@ numpy>=1.21.0
 streamlit>=1.25.0
 watchdog>=3.0.0
 pyngrok
+pymupdf>=1.23.5

@@ -154,8 +154,19 @@ class PassportExtractor:
         try:
             pages = convert_from_path(pdf_path)
         except Exception as e:
-            logger.error(f"Failed to convert PDF {pdf_path}: {e}")
-            return []
+            try:
+                import fitz
+                doc = fitz.open(pdf_path)
+                pages = []
+                for i in range(len(doc)):
+                    page = doc.load_page(i)
+                    pix = page.get_pixmap(dpi=200)
+                    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                    pages.append(img)
+                doc.close()
+            except Exception as e2:
+                logger.error(f"Failed to convert PDF {pdf_path}: {e2}")
+                return []
 
         for i, page in enumerate(pages):
             temp_img_path = os.path.join(TEMP_DIR, f"temp_page_{i+1}.png")
