@@ -45,6 +45,35 @@ class PassportExtractor:
         self.reader = easyocr.Reader(self.languages, gpu=use_gpu, model_storage_directory=model_dir)
         logger.info("EasyOCR Reader initialized.")
 
+    def _retry_with_rotation(self, img_path):
+        """Try rotating image 90, 180, 270 degrees to find MRZ."""
+        try:
+            original = Image.open(img_path)
+            
+            for angle in [90, 180, 270]:
+                logger.info(f"Retrying with rotation: {angle} degrees")
+                # expand=True ensures the whole image is kept
+                rotated = original.rotate(angle, expand=True)
+                
+                # Save to a temp file
+                temp_rot_path = img_path + f"_rot_{angle}.png"
+                rotated.save(temp_rot_path)
+                
+                mrz = read_mrz(temp_rot_path, save_roi=True)
+                
+                # Cleanup
+                if os.path.exists(temp_rot_path):
+                    os.remove(temp_rot_path)
+                
+                if mrz:
+                    logger.info(f"MRZ detected after rotation {angle}")
+                    return mrz
+                    
+            return None
+        except Exception as e:
+            logger.error(f"Rotation fallback failed: {e}")
+            return None
+
     def extract_mrz_from_roi(self, img_path):
         """
         Extracts MRZ lines using PassportEye to find ROI, then EasyOCR to read text.
@@ -55,7 +84,12 @@ class PassportExtractor:
             mrz = read_mrz(img_path, save_roi=True)
             
             if not mrz:
-                logger.warning(f"PassportEye failed to detect MRZ in {img_path}")
+                logger.warning(f"PassportEye failed to detect MRZ in {img_path}. Trying rotations...")
+                # Try rotating 90, 180, 270
+                mrz = self._retry_with_rotation(img_path)
+            
+            if not mrz:
+                logger.warning(f"PassportEye failed to detect MRZ in {img_path} after rotations.")
                 return None, None, None
 
             # Get ROI (Region of Interest)
