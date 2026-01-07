@@ -25,6 +25,7 @@ from src.utils import (
     get_sex, 
     setup_logger
 )
+from src.fallback_mrz import FallbackMRZ
 from config.settings import USE_GPU, OCR_LANGUAGES, TEMP_DIR
 
 # Suppress warnings
@@ -74,6 +75,48 @@ class PassportExtractor:
             logger.error(f"Rotation fallback failed: {e}")
             return None
 
+    def _fallback_direct_easyocr(self, img_path):
+        """
+        Fallback method: Read the entire image with EasyOCR and try to find MRZ lines.
+        """
+        try:
+            # Read full image
+            # detail=0 returns just the list of strings
+            result = self.reader.readtext(img_path, detail=0)
+            
+            # Filter and clean lines
+            potential_lines = []
+            for line in result:
+                clean = clean_mrz_line(line)
+                # Heuristic: MRZ lines are usually long (30-44 chars) and contain '<<' or start with P<, I<
+                if len(clean) > 30 and ('<<' in clean or clean.startswith(('P<', 'I<', 'A<', 'V<'))):
+                    potential_lines.append(clean)
+            
+            # Look for the last two valid lines (TD3 format usually has 2 lines at the bottom)
+            if len(potential_lines) >= 2:
+                # Assume the last two are the MRZ
+                line1 = potential_lines[-2]
+                line2 = potential_lines[-1]
+                
+                # Basic validation: Line 1 usually starts with P, I, A, V
+                if not line1[0] in 'PIAV':
+                     # Maybe we picked wrong lines. Let's look for a line starting with P/I/A/V
+                     for i, l in enumerate(potential_lines):
+                         if l.startswith(('P<', 'I<', 'A<', 'V<')) and i+1 < len(potential_lines):
+                             line1 = l
+                             line2 = potential_lines[i+1]
+                             break
+                
+                logger.info(f"Direct EasyOCR found potential MRZ: {line1} / {line2}")
+                mrz_obj = FallbackMRZ(line1, line2)
+                return line1, line2, mrz_obj
+            
+            return None, None, None
+
+        except Exception as e:
+            logger.error(f"Direct EasyOCR fallback failed: {e}")
+            return None, None, None
+
     def extract_mrz_from_roi(self, img_path):
         """
         Extracts MRZ lines using PassportEye to find ROI, then EasyOCR to read text.
@@ -90,7 +133,9 @@ class PassportExtractor:
             
             if not mrz:
                 logger.warning(f"PassportEye failed to detect MRZ in {img_path} after rotations.")
-                return None, None, None
+                # Fallback 2: Direct EasyOCR on the full image
+                logger.info("Attempting Direct EasyOCR fallback on full image...")
+                return self._fallback_direct_easyocr(img_path)
 
             # Get ROI (Region of Interest)
             roi = mrz.aux['roi']
