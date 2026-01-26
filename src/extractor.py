@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 import easyocr
 import warnings
+import re
 from passporteye import read_mrz
 from src.utils import clean_string, clean_mrz_line, parse_date, get_country_name, get_sex, setup_logger
 from src.validator import validate_passport_data
@@ -16,6 +17,14 @@ class PassportExtractor:
         self.languages = languages if languages else ["en"]
         self.airline = airline.lower().strip()
         self.reader = easyocr.Reader(self.languages, gpu=use_gpu)
+
+    def clean_noise(self, text):
+        """Removes stray 'K' characters often picked up by OCR at the end of lines"""
+        if not text: return ""
+        # This removes trailing K's and sequences like K KKKKK
+        cleaned = re.sub(r'\s+K\s+K*$', '', text)
+        cleaned = re.sub(r'\s+K+$', '', cleaned)
+        return cleaned.strip().upper()
 
     def extract_mrz_from_roi(self, img_path):
         try:
@@ -36,9 +45,13 @@ class PassportExtractor:
         line1, line2, mrz = self.extract_mrz_from_roi(img_path)
         if not mrz: return None
 
+        # Extract and immediately clean the noise from names
+        raw_surname = mrz.surname.replace("<<", " ") if mrz.surname else ""
+        raw_name = mrz.names.replace("<<", " ") if mrz.names else ""
+
         raw = {
-            "surname": mrz.surname.replace("<<", " ").strip().upper() if mrz.surname else "",
-            "name": mrz.names.replace("<<", " ").strip().upper() if mrz.names else "",
+            "surname": self.clean_noise(raw_surname),
+            "name": self.clean_noise(raw_name),
             "sex": get_sex(mrz.sex),
             "date_of_birth": parse_date(mrz.date_of_birth) or "",
             "nationality": get_country_name(mrz.nationality),
@@ -47,7 +60,6 @@ class PassportExtractor:
             "expiration_date": parse_date(mrz.expiration_date) or "",
         }
 
-        # Format choice
         if self.airline == "iraqi":
             return {
                 "TYPE": "Adult",
