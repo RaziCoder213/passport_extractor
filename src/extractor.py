@@ -21,7 +21,6 @@ class PassportExtractor:
     def clean_noise(self, text):
         """Removes stray 'K' characters often picked up by OCR at the end of lines"""
         if not text: return ""
-        # This removes trailing K's and sequences like K KKKKK
         cleaned = re.sub(r'\s+K\s+K*$', '', text)
         cleaned = re.sub(r'\s+K+$', '', cleaned)
         return cleaned.strip().upper()
@@ -45,14 +44,10 @@ class PassportExtractor:
         line1, line2, mrz = self.extract_mrz_from_roi(img_path)
         if not mrz: return None
 
-        # Extract and immediately clean the noise from names
-        raw_surname = mrz.surname.replace("<<", " ") if mrz.surname else ""
-        raw_name = mrz.names.replace("<<", " ") if mrz.names else ""
-
         raw = {
-            "surname": self.clean_noise(raw_surname),
-            "name": self.clean_noise(raw_name),
-            "sex": get_sex(mrz.sex),
+            "surname": self.clean_noise(mrz.surname.replace("<<", " ") if mrz.surname else ""),
+            "name": self.clean_noise(mrz.names.replace("<<", " ") if mrz.names else ""),
+            "sex": get_sex(mrz.sex), # Expected 'M' or 'F'
             "date_of_birth": parse_date(mrz.date_of_birth) or "",
             "nationality": get_country_name(mrz.nationality),
             "passport_number": clean_string(mrz.number),
@@ -60,10 +55,13 @@ class PassportExtractor:
             "expiration_date": parse_date(mrz.expiration_date) or "",
         }
 
+        # Dynamic Title Logic
+        title_val = "MR" if raw["sex"] == "M" else "MRS"
+
         if self.airline == "iraqi":
             return {
                 "TYPE": "Adult",
-                "TITLE": "MR/MRS",
+                "TITLE": title_val,  # Fixed: MR or MRS only
                 "FIRST NAME": raw["name"],
                 "LAST NAME": raw["surname"],
                 "DOB (DD/MM/YYYY)": raw["date_of_birth"],
@@ -73,7 +71,7 @@ class PassportExtractor:
             return {
                 "Last Name": raw["surname"],
                 "First Name and Middle Name": raw["name"],
-                "Title": "MR/MRS",
+                "Title": title_val, # Fixed: MR or MRS only
                 "PTC": "ADT",
                 "Gender": raw["sex"],
                 "Date of Birth": raw["date_of_birth"],
