@@ -9,7 +9,7 @@ import pillow_heif
 
 from src.extractor import PassportExtractor
 # Note: Ensure your file is named validator.py (singular) or adjust this import
-from src.validator import validate_passport_data
+from src.validators import validate_passport_data
 
 # --------------------------------------------------
 # Enable HEIC / HEIF support
