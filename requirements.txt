@@ -1,15 +1,27 @@
+# Core OCR & Passport Parsing
 passporteye>=2.1.0
 easyocr>=1.6.0
-matplotlib>=3.5.0
+
+# Image & PDF Processing
 opencv-python-headless>=4.5.0
-python-dateutil>=2.8.0
-pdf2image>=1.16.0
-pandas>=1.3.0
-openpyxl>=3.0.0
-tqdm>=4.60.0
 Pillow>=9.0.0
+pillow-heif>=0.15.0
+pdf2image>=1.16.0
+pymupdf>=1.23.5
+
+# Data Handling & Export
+pandas>=1.3.0
 numpy>=1.21.0
+openpyxl>=3.0.0
+python-dateutil>=2.8.0
+
+# Visualization (optional but used by OCR/debug)
+matplotlib>=3.5.0
+
+# CLI / Progress
+tqdm>=4.60.0
+
+# Streamlit App
 streamlit>=1.25.0
 watchdog>=3.0.0
 pyngrok
-pymupdf>=1.23.5
