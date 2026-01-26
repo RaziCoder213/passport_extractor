@@ -32,12 +32,10 @@ def main():
             df = pd.DataFrame(results)
             st.dataframe(df)
             
-            # Export logic
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 df.to_excel(writer, index=False)
             
-            # Renamed button text to "Export to XLS"
             st.download_button(
                 label="📥 Export to XLS", 
                 data=output.getvalue(), 
@@ -45,7 +43,7 @@ def main():
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
-            st.warning("No data found in uploaded files.")
+            st.warning("No data found.")
 
 if __name__ == "__main__":
     main()
