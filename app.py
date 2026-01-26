@@ -8,7 +8,8 @@ from PIL import Image
 import pillow_heif
 
 from src.extractor import PassportExtractor
-from src.validators import validate_passport_data
+# Note: Ensure your file is named validator.py (singular) or adjust this import
+from src.validator import validate_passport_data
 
 # --------------------------------------------------
 # Enable HEIC / HEIF support
@@ -38,7 +39,6 @@ def save_uploaded_file(uploaded_file):
     """
     Saves uploaded file.
     Converts AVIF / HEIC / HEIF / WEBP → PNG for OCR compatibility.
-    Returns path to temp file.
     """
     try:
         ext = os.path.splitext(uploaded_file.name)[1].lower()
@@ -50,12 +50,8 @@ def save_uploaded_file(uploaded_file):
         # Convert unsupported image formats to PNG
         if ext in [".avif", ".heic", ".heif", ".webp", ".tiff", ".bmp"]:
             image = Image.open(tmp_path).convert("RGB")
-
-            png_tmp = tempfile.NamedTemporaryFile(
-                delete=False, suffix=".png"
-            )
+            png_tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
             image.save(png_tmp.name, format="PNG")
-
             os.remove(tmp_path)
             return png_tmp.name
 
@@ -83,10 +79,12 @@ def main():
     # --------------------------------------------------
     st.sidebar.header("Configuration")
 
-    airline = st.sidebar.radio(
+    # Normalized values to match the validator logic
+    airline_choice = st.sidebar.radio(
         "Select Airline Format",
-        ["iraqi", "flydubai"]
+        ["Iraq", "FlyDubai"]
     )
+    airline = airline_choice.lower()
 
     enable_validation = st.sidebar.checkbox(
         "Enable Data Validation", value=True
@@ -97,13 +95,12 @@ def main():
     )
 
     # --------------------------------------------------
-    # File Upload (ALL formats)
+    # File Upload
     # --------------------------------------------------
     uploaded_files = st.file_uploader(
         "Upload Passport Files",
         type=[
-            "pdf",
-            "jpg", "jpeg", "png",
+            "pdf", "jpg", "jpeg", "png",
             "avif", "heic", "heif",
             "webp", "tiff", "bmp"
         ],
@@ -114,15 +111,12 @@ def main():
         st.info("Upload passport files to continue.")
         return
 
-    st.success(f"{len(uploaded_files)} file(s) uploaded")
-
     # --------------------------------------------------
     # Process
     # --------------------------------------------------
     if st.button("Process Files", type="primary"):
 
         extractor = get_extractor(use_gpu, airline)
-
         results = []
         progress = st.progress(0)
         status = st.empty()
@@ -145,19 +139,23 @@ def main():
                     if data:
                         file_results = [data]
 
-                if enable_validation:
-                    for res in file_results:
-                        errors = validate_passport_data(
-                            res, airline=airline
-                        )
-                        res["validation_errors"] = (
-                            "; ".join(errors) if errors else "Valid"
-                        )
-
+                # --------------------------------------------------
+                # VALIDATION LOGIC (FIXED FOR 2-VALUE RETURN)
+                # --------------------------------------------------
                 for res in file_results:
+                    if enable_validation:
+                        # We unpack TWO values now: bool and list
+                        is_valid, errors = validate_passport_data(res, airline=airline)
+                        
+                        res["Status"] = "✅ Valid" if is_valid else "❌ Invalid"
+                        res["validation_errors"] = "; ".join(errors) if errors else "None"
+                    else:
+                        res["Status"] = "Not Checked"
+                        res["validation_errors"] = "N/A"
+
                     res["original_filename"] = uploaded_file.name
                     res["airline_format"] = airline
-
+                
                 results.extend(file_results)
 
             except Exception as e:
@@ -172,7 +170,7 @@ def main():
         status.text("Processing complete")
 
         # --------------------------------------------------
-        # Results
+        # Display Results
         # --------------------------------------------------
         if not results:
             st.warning("No data extracted.")
@@ -180,7 +178,9 @@ def main():
 
         df = pd.DataFrame(results)
 
+        # Organize columns for better readability
         preferred_cols = [
+            "Status",
             "surname",
             "name",
             "passport_number",
@@ -189,23 +189,23 @@ def main():
             "sex",
             "expiration_date",
             "validation_errors",
-            "airline_format",
-            "original_filename",
         ]
 
-        ordered_cols = preferred_cols + [
-            c for c in df.columns if c not in preferred_cols
-        ]
-
+        ordered_cols = preferred_cols + [c for c in df.columns if c not in preferred_cols]
         df = df[[c for c in ordered_cols if c in df.columns]]
 
-        st.dataframe(df, use_container_width=True)
+        # Style the dataframe to highlight errors
+        def highlight_status(val):
+            color = '#ff4b4b' if 'Invalid' in str(val) else '#09ab3b' if 'Valid' in str(val) else ''
+            return f'color: {color}; font-weight: bold'
+
+        st.subheader("Extracted Data")
+        st.dataframe(df.style.applymap(highlight_status, subset=['Status']), use_container_width=True)
 
         # --------------------------------------------------
         # Downloads
         # --------------------------------------------------
         col1, col2 = st.columns(2)
-
         csv_data = df.to_csv(index=False).encode("utf-8")
         col1.download_button(
             "⬇ Download CSV",
@@ -225,8 +225,5 @@ def main():
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
-# --------------------------------------------------
-# Run
-# --------------------------------------------------
 if __name__ == "__main__":
     main()
