@@ -2,7 +2,7 @@ import datetime
 
 def validate_passport_data(data, airline: str):
     """
-    Checks for required fields based on airline rules.
+    Validates required fields based on airline rules.
     Returns: (is_valid: bool, errors: list)
     """
     errors = []
@@ -12,10 +12,8 @@ def validate_passport_data(data, airline: str):
     airline = airline.lower().strip()
 
     if airline == "iraqi":
-        # Iraqi requires basic identity
         required_fields = ["name", "surname", "date_of_birth", "sex"]
     elif airline in ("flydubai", "fly_dubai", "fz"):
-        # FlyDubai requires full passport details
         required_fields = [
             "surname", "name", "sex", "date_of_birth", 
             "passport_number", "nationality", "issuing_country", "expiration_date"
