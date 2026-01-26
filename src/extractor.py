@@ -19,7 +19,7 @@ class PassportExtractor:
         self.reader = easyocr.Reader(self.languages, gpu=use_gpu)
 
     def clean_noise(self, text):
-        """Removes stray 'K' characters often picked up by OCR at the end of lines"""
+        """Removes stray 'K' noise from OCR"""
         if not text: return ""
         cleaned = re.sub(r'\s+K\s+K*$', '', text)
         cleaned = re.sub(r'\s+K+$', '', cleaned)
@@ -44,10 +44,20 @@ class PassportExtractor:
         line1, line2, mrz = self.extract_mrz_from_roi(img_path)
         if not mrz: return None
 
+        # Clean noise from names
+        raw_surname = self.clean_noise(mrz.surname.replace("<<", " ") if mrz.surname else "")
+        raw_name = self.clean_noise(mrz.names.replace("<<", " ") if mrz.names else "")
+        
+        # Check for husband name/personal number hints to distinguish MS vs MRS
+        # This looks at the personal number field which often contains spouse info in some passports
+        has_husband = False
+        if mrz.personal_number and len(mrz.personal_number.strip()) > 1:
+            has_husband = True
+
         raw = {
-            "surname": self.clean_noise(mrz.surname.replace("<<", " ") if mrz.surname else ""),
-            "name": self.clean_noise(mrz.names.replace("<<", " ") if mrz.names else ""),
-            "sex": get_sex(mrz.sex), # Expected 'M' or 'F'
+            "surname": raw_surname,
+            "name": raw_name,
+            "sex": get_sex(mrz.sex), # 'M' or 'F'
             "date_of_birth": parse_date(mrz.date_of_birth) or "",
             "nationality": get_country_name(mrz.nationality),
             "passport_number": clean_string(mrz.number),
@@ -55,13 +65,17 @@ class PassportExtractor:
             "expiration_date": parse_date(mrz.expiration_date) or "",
         }
 
-        # Dynamic Title Logic
-        title_val = "MR" if raw["sex"] == "M" else "MRS"
+        # --- DYNAMIC TITLE LOGIC ---
+        if raw["sex"] == "M":
+            title_val = "MR"
+        else:
+            # If Female: MRS if husband name detected, otherwise MS
+            title_val = "MRS" if has_husband else "MS"
 
         if self.airline == "iraqi":
             return {
                 "TYPE": "Adult",
-                "TITLE": title_val,  # Fixed: MR or MRS only
+                "TITLE": title_val,
                 "FIRST NAME": raw["name"],
                 "LAST NAME": raw["surname"],
                 "DOB (DD/MM/YYYY)": raw["date_of_birth"],
@@ -71,7 +85,7 @@ class PassportExtractor:
             return {
                 "Last Name": raw["surname"],
                 "First Name and Middle Name": raw["name"],
-                "Title": title_val, # Fixed: MR or MRS only
+                "Title": title_val,
                 "PTC": "ADT",
                 "Gender": raw["sex"],
                 "Date of Birth": raw["date_of_birth"],
