@@ -4,8 +4,16 @@ import tempfile
 import pandas as pd
 import io
 
+from PIL import Image
+import pillow_heif
+
 from src.extractor import PassportExtractor
 from src.validators import validate_passport_data
+
+# --------------------------------------------------
+# Enable HEIC / HEIF support
+# --------------------------------------------------
+pillow_heif.register_heif_opener()
 
 # --------------------------------------------------
 # Page Configuration
@@ -17,26 +25,44 @@ st.set_page_config(
 )
 
 # --------------------------------------------------
-# Cached Extractor (important for Streamlit)
+# Cached Extractor
 # --------------------------------------------------
 @st.cache_resource
 def get_extractor(use_gpu: bool, airline: str):
-    return PassportExtractor(
-        use_gpu=use_gpu,
-        airline=airline
-    )
+    return PassportExtractor(use_gpu=use_gpu, airline=airline)
 
 # --------------------------------------------------
-# Helper: Save uploaded file temporarily
+# Helper: Save & normalize uploaded files
 # --------------------------------------------------
 def save_uploaded_file(uploaded_file):
+    """
+    Saves uploaded file.
+    Converts AVIF / HEIC / HEIF / WEBP → PNG for OCR compatibility.
+    Returns path to temp file.
+    """
     try:
-        suffix = os.path.splitext(uploaded_file.name)[1].lower()
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        ext = os.path.splitext(uploaded_file.name)[1].lower()
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
             tmp.write(uploaded_file.getvalue())
-            return tmp.name
+            tmp_path = tmp.name
+
+        # Convert unsupported image formats to PNG
+        if ext in [".avif", ".heic", ".heif", ".webp", ".tiff", ".bmp"]:
+            image = Image.open(tmp_path).convert("RGB")
+
+            png_tmp = tempfile.NamedTemporaryFile(
+                delete=False, suffix=".png"
+            )
+            image.save(png_tmp.name, format="PNG")
+
+            os.remove(tmp_path)
+            return png_tmp.name
+
+        return tmp_path
+
     except Exception as e:
-        st.error(f"Failed to save file: {e}")
+        st.error(f"File handling error: {e}")
         return None
 
 # --------------------------------------------------
@@ -47,49 +73,51 @@ def main():
 
     st.markdown(
         """
-        Upload passport **PDFs or Images** to extract MRZ and passport data.
-        Select the **airline format** to generate airline-specific output.
+        Upload passport files in **PDF or any image format**.
+        The system automatically normalizes images and extracts MRZ data.
         """
     )
 
     # --------------------------------------------------
-    # Sidebar Configuration
+    # Sidebar
     # --------------------------------------------------
     st.sidebar.header("Configuration")
 
     airline = st.sidebar.radio(
         "Select Airline Format",
-        options=["iraqi", "flydubai"],
-        index=0
+        ["iraqi", "flydubai"]
     )
 
     enable_validation = st.sidebar.checkbox(
-        "Enable Data Validation",
-        value=True
+        "Enable Data Validation", value=True
     )
 
     use_gpu = st.sidebar.checkbox(
-        "Use GPU for OCR (if available)",
-        value=False
+        "Use GPU for OCR", value=False
     )
 
     # --------------------------------------------------
-    # File Upload
+    # File Upload (ALL formats)
     # --------------------------------------------------
     uploaded_files = st.file_uploader(
-        "Upload Passport Files (PDF, JPG, PNG)",
-        type=["pdf", "jpg", "jpeg", "png"],
+        "Upload Passport Files",
+        type=[
+            "pdf",
+            "jpg", "jpeg", "png",
+            "avif", "heic", "heif",
+            "webp", "tiff", "bmp"
+        ],
         accept_multiple_files=True
     )
 
     if not uploaded_files:
-        st.info("Please upload passport files to continue.")
+        st.info("Upload passport files to continue.")
         return
 
-    st.success(f"{len(uploaded_files)} file(s) loaded")
+    st.success(f"{len(uploaded_files)} file(s) uploaded")
 
     # --------------------------------------------------
-    # Process Button
+    # Process
     # --------------------------------------------------
     if st.button("Process Files", type="primary"):
 
@@ -103,7 +131,6 @@ def main():
             status.text(f"Processing: {uploaded_file.name}")
 
             temp_path = save_uploaded_file(uploaded_file)
-
             if not temp_path:
                 continue
 
@@ -118,18 +145,15 @@ def main():
                     if data:
                         file_results = [data]
 
-                # Validation
                 if enable_validation:
                     for res in file_results:
                         errors = validate_passport_data(
-                            res,
-                            airline=airline
+                            res, airline=airline
                         )
                         res["validation_errors"] = (
                             "; ".join(errors) if errors else "Valid"
                         )
 
-                # Metadata
                 for res in file_results:
                     res["original_filename"] = uploaded_file.name
                     res["airline_format"] = airline
@@ -137,7 +161,7 @@ def main():
                 results.extend(file_results)
 
             except Exception as e:
-                st.error(f"Error processing {uploaded_file.name}: {e}")
+                st.error(f"Failed: {uploaded_file.name} — {e}")
 
             finally:
                 if os.path.exists(temp_path):
@@ -148,17 +172,14 @@ def main():
         status.text("Processing complete")
 
         # --------------------------------------------------
-        # Display Results
+        # Results
         # --------------------------------------------------
         if not results:
             st.warning("No data extracted.")
             return
 
-        st.success(f"Extracted {len(results)} record(s)")
-
         df = pd.DataFrame(results)
 
-        # Preferred column order
         preferred_cols = [
             "surname",
             "name",
@@ -185,7 +206,6 @@ def main():
         # --------------------------------------------------
         col1, col2 = st.columns(2)
 
-        # CSV
         csv_data = df.to_csv(index=False).encode("utf-8")
         col1.download_button(
             "⬇ Download CSV",
@@ -194,10 +214,9 @@ def main():
             mime="text/csv"
         )
 
-        # Excel
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-            df.to_excel(writer, index=False, sheet_name="Data")
+            df.to_excel(writer, index=False)
 
         col2.download_button(
             "⬇ Download Excel",
@@ -205,7 +224,6 @@ def main():
             file_name=f"passport_data_{airline}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-
 
 # --------------------------------------------------
 # Run
