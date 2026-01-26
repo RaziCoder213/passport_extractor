@@ -14,7 +14,7 @@ from src.utils import (
     clean_string, clean_mrz_line, parse_date, 
     get_country_name, get_sex, setup_logger
 )
-from src.validator import validate_passport_data  # <--- CRITICAL IMPORT
+from src.validators import validate_passport_data  # <--- CRITICAL IMPORT
 from src.fallback_mrz import FallbackMRZ
 from config.settings import USE_GPU, OCR_LANGUAGES, TEMP_DIR
 
