@@ -21,7 +21,6 @@ class PassportExtractor:
         try:
             mrz = read_mrz(img_path)
             if not mrz: return None, None, None
-            
             roi = mrz.aux.get("roi")
             if roi is not None:
                 if roi.dtype != np.uint8: roi = (roi * 255).astype(np.uint8)
@@ -37,11 +36,10 @@ class PassportExtractor:
         line1, line2, mrz = self.extract_mrz_from_roi(img_path)
         if not mrz: return None
 
-        # Step 1: Internal Raw Data
         raw = {
             "surname": mrz.surname.replace("<<", " ").strip().upper() if mrz.surname else "",
             "name": mrz.names.replace("<<", " ").strip().upper() if mrz.names else "",
-            "sex": get_sex(mrz.sex), # M or F
+            "sex": get_sex(mrz.sex),
             "date_of_birth": parse_date(mrz.date_of_birth) or "",
             "nationality": get_country_name(mrz.nationality),
             "passport_number": clean_string(mrz.number),
@@ -49,11 +47,7 @@ class PassportExtractor:
             "expiration_date": parse_date(mrz.expiration_date) or "",
         }
 
-        # Step 2: Validate
-        is_valid, errors = validate_passport_data(raw, self.airline)
-        val_status = "OK" if is_valid else "; ".join(errors)
-
-        # Step 3: Final Airline-Specific Mapping
+        # Format choice
         if self.airline == "iraqi":
             return {
                 "TYPE": "Adult",
@@ -61,11 +55,9 @@ class PassportExtractor:
                 "FIRST NAME": raw["name"],
                 "LAST NAME": raw["surname"],
                 "DOB (DD/MM/YYYY)": raw["date_of_birth"],
-                "GENDER": "Male" if raw["sex"] == "M" else "Female",
-                "Validation": val_status
+                "GENDER": "Male" if raw["sex"] == "M" else "Female"
             }
-        
-        else: # FlyDubai
+        else: # flydubai
             return {
                 "Last Name": raw["surname"],
                 "First Name and Middle Name": raw["name"],
@@ -76,6 +68,5 @@ class PassportExtractor:
                 "Passport Number": raw["passport_number"],
                 "Passport Nationality": raw["nationality"],
                 "Passport Issue Country": raw["issuing_country"],
-                "Passport Expiry Date": raw["expiration_date"],
-                "Validation": val_status
+                "Passport Expiry Date": raw["expiration_date"]
             }
