@@ -1,34 +1,62 @@
 import datetime
 
-def validate_passport_data(data):
+def validate_passport_data(data, airline: str):
     """
-    Validates extracted passport data.
-    Returns a list of validation warnings/errors.
+    Validates extracted passport data based on airline-specific rules.
+    1. Iraq: Requires Sex, does not strictly require Issuing Country.
+    2. FlyDubai: Requires Issuing Country, does not strictly require Sex.
     """
     errors = []
     
     if not data:
-        return ["No data to validate"]
+        return False, ["No data to validate"]
 
-    # Check required fields
-    required_fields = ['surname', 'name', 'passport_number', 'nationality']
+    # Normalize airline input
+    airline = airline.lower().strip() if airline else "unknown"
+
+    # 1. Define required fields based on airline rules
+    if airline == "iraq":
+        required_fields = [
+            "surname",
+            "name",
+            "passport_number",
+            "date_of_birth",
+            "expiration_date",
+            "nationality",
+            "sex",
+        ]
+    elif airline in ("flydubai", "fly_dubai", "fz"):
+        required_fields = [
+            "surname",
+            "name",
+            "passport_number",
+            "date_of_birth",
+            "expiration_date",
+            "issuing_country",
+            "nationality",
+        ]
+    else:
+        # If the airline is not recognized
+        errors.append(f"Unknown airline format: {airline}")
+        return False, errors
+
+    # 2. Check for missing or empty required fields
     for field in required_fields:
-        if not data.get(field):
+        if not data.get(field) or str(data.get(field)).strip() == "":
             errors.append(f"Missing required field: {field}")
 
-    # Validate dates (basic check if they look like DD/MM/YYYY)
+    # 3. Validate Date Formats (Optional but recommended)
     date_fields = ['date_of_birth', 'expiration_date']
     for field in date_fields:
         val = data.get(field)
-        if val:
+        if val and val != "N/A":
             try:
-                datetime.datetime.strptime(val, '%d/%m/%Y')
+                # Assuming your parse_date util returns DD/MM/YYYY
+                if "/" in val:
+                    datetime.datetime.strptime(val, '%d/%m/%Y')
             except ValueError:
-                errors.append(f"Invalid date format for {field}: {val} (expected DD/MM/YYYY)")
+                errors.append(f"Invalid date format for {field}: {val}")
 
-    # Validate MRZ length roughly (should be around 88 chars for TD3)
-    mrz = data.get('mrz_full_string', '')
-    if len(mrz) < 80:
-        errors.append(f"MRZ string seems too short ({len(mrz)} chars)")
-
-    return errors
+    # Return boolean status and the list of errors
+    is_valid = len(errors) == 0
+    return is_valid, errors
