@@ -58,17 +58,47 @@ def clean_name_field(text):
     words = text.split()
     cleaned_words = []
     
-    for word in words:
+    # Heuristic: Detect if we have a tail of single/double char junk
+    # Iterate backwards? No, let's just process forward but be aware of the "tail"
+    
+    for i, word in enumerate(words):
         # Check if word is suspicious (mostly Ks or <s)
-        # We check words length >= 3 to avoid deleting short initials like "K"
+        
+        # 3a. Long junk words (handles KKKKKKKKKKEKKKK)
         if len(word) >= 3:
             k_count = word.count('K') + word.count('<')
             ratio = k_count / len(word)
             
             # If more than 70% of the word is K or <, assume it's garbage and stop
-            # This handles "KKKKKKKKKEKKKK" where E is buried in Ks
             if ratio > 0.7:
                 break
+        
+        # 3b. Sequence of short junk words (handles K K K K)
+        # If this word is short (<3 chars) and mostly K/<, AND all subsequent words are also junk-like?
+        # This is risky for "MARK K" (middle name K).
+        # But if we have 3 or more junk-like tokens in a row?
+        
+        # Simplified: If we see 3+ consecutive tokens that are single chars 'K' or '<', strip them.
+        # Check ahead
+        if len(word) <= 2:
+            is_junk = all(c in 'K<' for c in word)
+            if is_junk:
+                # Look ahead to see if it's a sequence
+                # We need at least 2 junk tokens to call it junk? "MARK K" -> Keep. "MARK K K" -> Strip?
+                # User issue was aggressive.
+                
+                # Let's count how many junk tokens follow (including this one)
+                junk_sequence_len = 0
+                for next_word in words[i:]:
+                    if len(next_word) <= 2 and all(c in 'K<' for c in next_word):
+                        junk_sequence_len += 1
+                    else:
+                        break
+                
+                # If we have a sequence of 3 or more junk tokens, or if it's the very last token and it's 'K' (risky?), no.
+                # Let's say if we have >= 3 junk tokens, we stop here.
+                if junk_sequence_len >= 3:
+                    break
         
         cleaned_words.append(word)
             

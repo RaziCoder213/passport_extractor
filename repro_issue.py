@@ -2,23 +2,32 @@
 from src.utils import clean_name_field
 
 def test_repro():
-    # Case 1: Exact string from user (assuming uppercase)
+    print("--- Existing Cases ---")
+    # Case 1: Exact string from user
     input_1 = "ASMAT           KKKKKKKKKKKKKKKK"
-    output_1 = clean_name_field(input_1)
-    print(f"Input: '{input_1}'")
-    print(f"Output: '{output_1}'")
+    print(f"Input: '{input_1}' -> '{clean_name_field(input_1)}'")
     
-    # Case 2: Lowercase input (Hypothesis)
+    # Case 2: Lowercase
     input_2 = "asmat           kkkkkkkkkkkkkkkk"
-    output_2 = clean_name_field(input_2)
-    print(f"Input: '{input_2}'")
-    print(f"Output: '{output_2}'")
+    print(f"Input: '{input_2}' -> '{clean_name_field(input_2)}'")
     
-    # Case 3: Mixed case
-    input_3 = "Asmat           Kkkkkkkkkkkkkkkk"
-    output_3 = clean_name_field(input_3)
-    print(f"Input: '{input_3}'")
-    print(f"Output: '{output_3}'")
+    print("\n--- New Edge Cases (Spaced Junk) ---")
+    # Case 3: Spaced K's
+    input_3 = "ASMAT K K K K K"
+    print(f"Input: '{input_3}' -> '{clean_name_field(input_3)}'")
+    
+    # Case 4: Mixed spaced junk
+    input_4 = "ASMAT < K < K"
+    print(f"Input: '{input_4}' -> '{clean_name_field(input_4)}'")
+
+    # Case 5: Valid name with K initials
+    input_5 = "JOHN F KENNEDY"
+    print(f"Input: '{input_5}' -> '{clean_name_field(input_5)}'")
+    
+    input_6 = "MARK K" # Valid initial? Or junk? 
+    # Usually MRZ doesn't have initials at the end unless it's part of the name.
+    # But "MARK K" is ambiguous. "MARK K<" -> "MARK K".
+    print(f"Input: '{input_6}' -> '{clean_name_field(input_6)}'")
 
 if __name__ == "__main__":
     test_repro()
