@@ -45,6 +45,9 @@ def clean_name_field(text):
     if not text:
         return ""
     
+    # Normalize to uppercase first
+    text = text.upper()
+    
     # 1. Replace << with space (standard MRZ separator)
     text = text.replace("<<", " ")
     
@@ -69,7 +72,7 @@ def clean_name_field(text):
         
         cleaned_words.append(word)
             
-    return " ".join(cleaned_words).strip().upper()
+    return " ".join(cleaned_words).strip()
 
 def clean_mrz_line(line: str) -> str:
     """Fix bad spacing or bad OCR for MRZ lines."""
