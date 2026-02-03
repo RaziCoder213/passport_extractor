@@ -5,6 +5,7 @@ import pandas as pd
 import time
 from src.extractor import PassportExtractor
 from src.validators import validate_passport_data
+from src.formats import format_iraqi_airways, format_flydubai
 
 # Set page configuration
 st.set_page_config(
@@ -41,6 +42,14 @@ def main():
     # Sidebar for configuration
     st.sidebar.header("Configuration")
     enable_validation = st.sidebar.checkbox("Enable Data Validation", value=True)
+    
+    # Format Selection
+    st.sidebar.subheader("Export Format")
+    export_format_type = st.sidebar.radio(
+        "Choose Airline Format",
+        ("Standard", "Iraqi Airways", "Flydubai"),
+        index=0
+    )
     
     # File Uploader
     uploaded_files = st.file_uploader(
@@ -109,17 +118,23 @@ def main():
             if results:
                 st.success(f"Successfully extracted {len(results)} records.")
                 
-                # Create DataFrame
-                df = pd.DataFrame(results)
-                
-                # Reorder columns for better readability if possible
-                cols = ['surname', 'name', 'passport_number', 'nationality', 'date_of_birth', 'sex', 'expiration_date', 'validation_errors', 'original_filename']
-                # Add missing cols to list if they exist in df
-                all_cols = cols + [c for c in df.columns if c not in cols]
-                # Filter valid columns only
-                final_cols = [c for c in all_cols if c in df.columns]
-                
-                df = df[final_cols]
+                # Apply formatting based on selection
+                if export_format_type == "Iraqi Airways":
+                    df = format_iraqi_airways(results)
+                    st.info("Applying Iraqi Airways format")
+                elif export_format_type == "Flydubai":
+                    df = format_flydubai(results)
+                    st.info("Applying Flydubai format")
+                else:
+                    # Standard Format
+                    df = pd.DataFrame(results)
+                    # Reorder columns for better readability if possible
+                    cols = ['surname', 'name', 'passport_number', 'nationality', 'date_of_birth', 'sex', 'expiration_date', 'validation_errors', 'original_filename']
+                    # Add missing cols to list if they exist in df
+                    all_cols = cols + [c for c in df.columns if c not in cols]
+                    # Filter valid columns only
+                    final_cols = [c for c in all_cols if c in df.columns]
+                    df = df[final_cols]
                 
                 # Display Data
                 st.dataframe(df)
@@ -130,9 +145,9 @@ def main():
                 # CSV Download
                 csv = df.to_csv(index=False).encode('utf-8')
                 col1.download_button(
-                    label="Download CSV",
+                    label=f"Download CSV ({export_format_type})",
                     data=csv,
-                    file_name="passport_data.csv",
+                    file_name=f"passport_data_{export_format_type.lower().replace(' ', '_')}.csv",
                     mime="text/csv",
                 )
                 
@@ -144,9 +159,9 @@ def main():
                     df.to_excel(writer, index=False, sheet_name='Sheet1')
                 
                 col2.download_button(
-                    label="Download Excel",
+                    label=f"Download Excel ({export_format_type})",
                     data=buffer.getvalue(),
-                    file_name="passport_data.xlsx",
+                    file_name=f"passport_data_{export_format_type.lower().replace(' ', '_')}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
                 
