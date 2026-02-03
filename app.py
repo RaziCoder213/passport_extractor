@@ -65,12 +65,19 @@ def main():
                 
                 if temp_path:
                     try:
-                        ext = os.path.splitext(temp_path)[1].lower()
+                        # Determine if PDF based on MIME type or extension
+                        is_pdf = False
+                        if uploaded_file.type == "application/pdf":
+                            is_pdf = True
+                        elif os.path.splitext(temp_path)[1].lower() == '.pdf':
+                            is_pdf = True
+                        
                         file_results = []
                         
-                        if ext == '.pdf':
+                        if is_pdf:
                             file_results = extractor.process_pdf(temp_path)
                         else:
+                            # Assume it's an image
                             data = extractor.get_data(temp_path)
                             if data:
                                 file_results = [data]

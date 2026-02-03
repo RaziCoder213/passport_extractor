@@ -23,7 +23,8 @@ from src.utils import (
     parse_date, 
     get_country_name, 
     get_sex, 
-    setup_logger
+    setup_logger,
+    clean_name_field
 )
 from src.fallback_mrz import FallbackMRZ
 from config.settings import USE_GPU, OCR_LANGUAGES, TEMP_DIR
@@ -200,8 +201,8 @@ class PassportExtractor:
 
         data = {}
         # Use PassportEye's parsing where possible, fallback/clean as needed
-        data['surname'] = mrz.surname.replace("<<", " ").strip().upper() if mrz.surname else ""
-        data['name'] = mrz.names.replace("<<", " ").strip().upper() if mrz.names else ""
+        data['surname'] = clean_name_field(mrz.surname)
+        data['name'] = clean_name_field(mrz.names)
         data['sex'] = get_sex(mrz.sex)
         data['date_of_birth'] = parse_date(mrz.date_of_birth) if mrz.date_of_birth else ""
         data['nationality'] = get_country_name(mrz.nationality)

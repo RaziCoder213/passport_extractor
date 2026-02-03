@@ -2,6 +2,7 @@ import string as st
 from dateutil import parser
 import logging
 import sys
+import re
 from config.settings import COUNTRY_CODES
 
 def setup_logger(name=__name__):
@@ -35,6 +36,40 @@ def clean_string(text):
     if not text:
         return ""
     return ''.join(i for i in text if i.isalnum()).upper()
+
+def clean_name_field(text):
+    """
+    Cleans name/surname fields from MRZ.
+    Handles standard separators (<<, <) and fixes common OCR errors where fillers (<) are read as 'K'.
+    """
+    if not text:
+        return ""
+    
+    # 1. Replace << with space (standard MRZ separator)
+    text = text.replace("<<", " ")
+    
+    # 2. Replace < with space (filler within name)
+    text = text.replace("<", " ")
+    
+    # 3. Clean up junk words (often long sequences of Ks from OCR errors)
+    words = text.split()
+    cleaned_words = []
+    
+    for word in words:
+        # Check if word is suspicious (mostly Ks or <s)
+        # We check words length >= 3 to avoid deleting short initials like "K"
+        if len(word) >= 3:
+            k_count = word.count('K') + word.count('<')
+            ratio = k_count / len(word)
+            
+            # If more than 70% of the word is K or <, assume it's garbage and stop
+            # This handles "KKKKKKKKKEKKKK" where E is buried in Ks
+            if ratio > 0.7:
+                break
+        
+        cleaned_words.append(word)
+            
+    return " ".join(cleaned_words).strip().upper()
 
 def clean_mrz_line(line: str) -> str:
     """Fix bad spacing or bad OCR for MRZ lines."""
