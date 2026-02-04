@@ -7,6 +7,32 @@ logger = logging.getLogger(__name__)
 def format_iraqi_airways(data_list):
     """
     Formats data for Iraqi Airways template.
+    Columns: TYPE, TITLE, FIRST NAME, LAST NAME, DOB (DD/MM/YYYY), GENDER
+    Example: Adult MR FirstNameOne LastNameOne 13/8/2015 Male
+    """
+    formatted_rows = []
+    
+    for item in data_list:
+        sex = item.get('sex', '').upper()
+        # Map Gender to Male/Female
+        gender_full = "Male" if sex == 'M' else "Female"
+        title = "MR" if sex == 'M' else "MRS"
+        
+        row = {
+            "TYPE": "Adult", # Default
+            "TITLE": title,
+            "FIRST NAME": item.get('name', ''),
+            "LAST NAME": item.get('surname', ''),
+            "DOB (DD/MM/YYYY)": item.get('date_of_birth', ''),
+            "GENDER": gender_full
+        }
+        formatted_rows.append(row)
+        
+    return pd.DataFrame(formatted_rows)
+
+def format_flydubai(data_list):
+    """
+    Formats data for Flydubai template.
     Columns: Last Name, First Name and Middle Name, Title, PTC, Gender, Date of Birth, 
              Passport Last Name, Passport First Name, Passport Middle Name, Passport Number, 
              Passport Nationality, Passport Issue Country, Passport Expiry Date, 
@@ -63,32 +89,6 @@ def format_iraqi_airways(data_list):
             "Address City": "",
             "Address State": "",
             "Address Zip Code": ""
-        }
-        formatted_rows.append(row)
-        
-    return pd.DataFrame(formatted_rows)
-
-def format_flydubai(data_list):
-    """
-    Formats data for Flydubai template.
-    Columns: TYPE, TITLE, FIRST NAME, LAST NAME, DOB (DD/MM/YYYY), GENDER
-    Example: Adult MR FirstNameOne LastNameOne 13/8/2015 Male
-    """
-    formatted_rows = []
-    
-    for item in data_list:
-        sex = item.get('sex', '').upper()
-        # Map Gender to Male/Female
-        gender_full = "Male" if sex == 'M' else "Female"
-        title = "MR" if sex == 'M' else "MRS"
-        
-        row = {
-            "TYPE": "Adult", # Default
-            "TITLE": title,
-            "FIRST NAME": item.get('name', ''),
-            "LAST NAME": item.get('surname', ''),
-            "DOB (DD/MM/YYYY)": item.get('date_of_birth', ''),
-            "GENDER": gender_full
         }
         formatted_rows.append(row)
         
