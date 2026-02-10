@@ -83,20 +83,12 @@ def clean_name_field(text):
         if len(word) <= 2:
             is_junk = all(c in 'K' for c in word)
             if is_junk:
-                # Look ahead to see if it's a sequence
-                # We need at least 2 junk tokens to call it junk? "MARK K" -> Keep. "MARK K K" -> Strip?
-                # User issue was aggressive.
-                
-                # Let's count how many junk tokens follow (including this one)
                 junk_sequence_len = 0
                 for next_word in words[i:]:
                     if len(next_word) <= 2 and all(c in 'K' for c in next_word):
                         junk_sequence_len += 1
                     else:
                         break
-                
-                # If we have a sequence of 3 or more junk tokens, or if it's the very last token and it's 'K' (risky?), no.
-                # Let's say if we have >= 2 junk tokens, we stop here.
                 if junk_sequence_len >= 2:
                     break
         
