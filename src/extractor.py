@@ -197,11 +197,12 @@ class PassportExtractor:
         line1, line2, mrz = self.extract_mrz_from_roi(img_path)
 
         if mrz is None:
-            # Fallback if MRZ object is None but we have lines
             if line1 and line2:
                 mrz = FallbackMRZ(line1, line2)
-            else:
-                return None
+
+        if mrz is None:
+            logger.warning(f"Could not extract a valid MRZ from {img_path}")
+            return None
         
         # Clean name fields
         surname = clean_name_field(mrz.surname)
