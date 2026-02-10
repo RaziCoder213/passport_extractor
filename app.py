@@ -53,7 +53,7 @@ def main():
     # File Uploader
     uploaded_files = st.file_uploader(
         "Upload Passport Files",
-        type=['png', 'jpg', 'jpeg', 'pdf'],
+        type=['png', 'jpg', 'jpeg', 'pdf', 'avif', 'webp', 'bmp', 'tiff'],
         accept_multiple_files=True
     )
 
