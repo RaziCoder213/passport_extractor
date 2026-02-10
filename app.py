@@ -99,14 +99,31 @@ def main():
 
             st.dataframe(df)
             
-            # Download button
-            csv = df.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="Download data as CSV",
-                data=csv,
-                file_name=f"passport_data_{airline.lower()}.csv",
-                mime="text/csv",
-            )
+            # Download buttons
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                csv = df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="Download data as CSV",
+                    data=csv,
+                    file_name=f"passport_data_{airline.lower()}.csv",
+                    mime="text/csv",
+                )
+            
+            with col2:
+                # Create an in-memory Excel file
+                from io import BytesIO
+                output = BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    df.to_excel(writer, index=False, sheet_name='PassportData')
+                
+                st.download_button(
+                    label="Download data as Excel",
+                    data=output.getvalue(),
+                    file_name=f"passport_data_{airline.lower()}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
 
 if __name__ == "__main__":
     main()
