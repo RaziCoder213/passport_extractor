@@ -160,7 +160,7 @@ class PassportExtractor:
             img_resized = cv2.resize(roi, (1110, 140))
             
             # Define allowed characters for MRZ
-            allow = st.ascii_letters + st.digits + "<"
+            allow = st.ascii_uppercase + st.digits + "<"
             
             # Run EasyOCR
             code = self.reader.readtext(img_resized, detail=0, allowlist=allow)
@@ -208,11 +208,11 @@ class PassportExtractor:
         mrz_data = mrz.to_dict() if hasattr(mrz, 'to_dict') else {}
         
         surname = clean_name_field(mrz_data.get('surname', ''))
-        name = clean_name_field(mrz_data.get('names', ''))
+        name = clean_name_field(mrz_data.get('name', ''))
 
         data = {
             "surname": surname,
-            "names": name,
+            "name": name,
             "country": get_country_name(mrz_data.get('country', '')),
             "nationality": get_country_name(mrz_data.get('nationality', '')),
             "passport_number": clean_string(mrz_data.get('number', '')),
