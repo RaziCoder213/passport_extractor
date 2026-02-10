@@ -39,16 +39,19 @@ def _to_ddmmmyy(date_str):
     try:
         # Parse from DD/MM/YYYY
         dt_obj = datetime.strptime(date_str, '%d/%m/%Y')
-        # Format to DDMMMYY
-        return dt_obj.strftime('%d%b%y').upper()
+        # Format to DDMMMYY with strict zero padding for day
+        # %d should do it, but to be safe we can use string formatting
+        day = dt_obj.strftime('%d')
+        month_year = dt_obj.strftime('%b%y').upper()
+        return f"{day}{month_year}"
     except ValueError:
         return date_str # Return original if parsing fails
 
 def format_flydubai(data_list):
     """
     Formats data for Flydubai template.
-    - Date of Birth: DDMMMYY
-    - Passport Expiry Date: DOB repeated four times
+    - Date of Birth: DDMMMYY (e.g., 13NOV84)
+    - Passport Expiry Date: DDMMMYY (e.g., 13NOV84)
     """
     formatted_rows = []
     
