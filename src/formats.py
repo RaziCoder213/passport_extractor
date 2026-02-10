@@ -30,37 +30,37 @@ def format_iraqi_airways(data_list):
         
     return pd.DataFrame(formatted_rows)
 
+from datetime import datetime
+
+def _to_ddmmmyy(date_str):
+    """Converts DD/MM/YYYY to DDMMMYY format, e.g., 13NOV84."""
+    if not date_str:
+        return ""
+    try:
+        # Parse from DD/MM/YYYY
+        dt_obj = datetime.strptime(date_str, '%d/%m/%Y')
+        # Format to DDMMMYY
+        return dt_obj.strftime('%d%b%y').upper()
+    except ValueError:
+        return date_str # Return original if parsing fails
+
 def format_flydubai(data_list):
     """
     Formats data for Flydubai template.
-    Columns: Last Name, First Name and Middle Name, Title, PTC, Gender, Date of Birth, 
-             Passport Last Name, Passport First Name, Passport Middle Name, Passport Number, 
-             Passport Nationality, Passport Issue Country, Passport Expiry Date, 
-             Visa Number, Visa Type, Visa Issue Date, Place of Birth, Visa Place of Issue, 
-             Visa Country of Application, Address Type, Address Country, Address Details, 
-             Address City, Address State, Address Zip Code
+    - Date of Birth: DDMMMYY
+    - Passport Expiry Date: DOB repeated four times
     """
     formatted_rows = []
     
     for item in data_list:
-        # Determine Title and PTC (Passenger Type Code) based on Age/Gender
-        # Defaulting to ADT (Adult) if dob is missing or calculation complex for now.
-        # Logic: 
-        # Infant < 2 years
-        # Child < 12 years
-        # Adult >= 12 years
-        # Title: MR, MRS, MISS, MSTR
-        
-        # We need to parse DOB properly to determine age.
-        # For now, we will map available fields.
-        
         sex = item.get('sex', '').upper()
-        # Simple Title Logic
         title = "MR" if sex == 'M' else "MRS" 
         
-        # Split names
-        # 'name' field usually contains First + Middle names in MRZ
         first_middle = item.get('name', '')
+        
+        # Format dates
+        dob_formatted = _to_ddmmmyy(item.get('date_of_birth', ''))
+        expiry_formatted = dob_formatted * 4
         
         row = {
             "Last Name": item.get('surname', ''),
@@ -68,27 +68,19 @@ def format_flydubai(data_list):
             "Title": title,
             "PTC": "ADT", # Default to Adult
             "Gender": sex,
-            "Date of Birth": item.get('date_of_birth', ''),
+            "Date of Birth": dob_formatted,
             "Passport Last Name": item.get('surname', ''),
-            "Passport First Name": first_middle, # Using full given name
-            "Passport Middle Name": "", # MRZ doesn't separate Middle name clearly
+            "Passport First Name": first_middle,
+            "Passport Middle Name": "",
             "Passport Number": item.get('passport_number', ''),
-            "Passport Nationality": item.get('nationality', '')[:3], # Usually 3 letter code
+            "Passport Nationality": item.get('nationality', '')[:3],
             "Passport Issue Country": item.get('issuing_country', '')[:3],
-            "Passport Expiry Date": item.get('expiration_date', ''),
-            # Empty fields for Visa/Address as they are not in Passport MRZ
-            "Visa Number": "",
-            "Visa Type": "",
-            "Visa Issue Date": "",
-            "Place of Birth": "",
-            "Visa Place of Issue": "",
-            "Visa Country of Application": "",
-            "Address Type": "",
-            "Address Country": "",
-            "Address Details": "",
-            "Address City": "",
-            "Address State": "",
-            "Address Zip Code": ""
+            "Passport Expiry Date": expiry_formatted,
+            # Empty fields
+            "Visa Number": "", "Visa Type": "", "Visa Issue Date": "", "Place of Birth": "",
+            "Visa Place of Issue": "", "Visa Country of Application": "", "Address Type": "",
+            "Address Country": "", "Address Details": "", "Address City": "",
+            "Address State": "", "Address Zip Code": ""
         }
         formatted_rows.append(row)
         
@@ -129,5 +121,3 @@ def export_to_spreadsheet(data_list, output_file, format='excel'):
     except Exception as e:
         logger.error(f"Failed to export data: {e}")
         return False
-        
-        
