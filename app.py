@@ -126,7 +126,34 @@ def main():
             output = BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 df.to_excel(writer, index=False, sheet_name='PassportData')
-            
+                
+                # Access the workbook and worksheet
+                workbook = writer.book
+                worksheet = writer.sheets['PassportData']
+                
+                # Iterate over all columns to adjust width and format
+                for column in worksheet.columns:
+                    max_length = 0
+                    column_letter = column[0].column_letter # Get the column name
+                    header_value = column[0].value
+                    
+                    # Check if this is a date column for Flydubai or generic
+                    is_date_col = header_value in ["Date of Birth", "Passport Expiry Date", "DOB (DD/MM/YYYY)"]
+                    
+                    for cell in column:
+                        try:
+                            if len(str(cell.value)) > max_length:
+                                max_length = len(str(cell.value))
+                            
+                            # If it's a date column, force text format to prevent Excel from auto-converting to default date format
+                            if is_date_col and cell.row > 1: # Skip header
+                                cell.number_format = '@'
+                        except:
+                            pass
+                    
+                    adjusted_width = (max_length + 2)
+                    worksheet.column_dimensions[column_letter].width = adjusted_width
+
             st.download_button(
                 label="Download data as Excel",
                 data=output.getvalue(),
