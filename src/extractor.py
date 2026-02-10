@@ -204,22 +204,24 @@ class PassportExtractor:
             logger.warning(f"Could not extract a valid MRZ from {img_path}")
             return None
         
-        # Clean name fields
-        surname = clean_name_field(getattr(mrz, 'surname', ''))
-        name = clean_name_field(getattr(mrz, 'name', ''))
+        # Safely get data from MRZ object
+        mrz_data = mrz.to_dict() if hasattr(mrz, 'to_dict') else {}
+        
+        surname = clean_name_field(mrz_data.get('surname', ''))
+        name = clean_name_field(mrz_data.get('names', ''))  # Corrected from 'name' to 'names'
 
         data = {
             "surname": surname,
             "name": name,
-            "country": get_country_name(getattr(mrz, 'country', '')),
-            "nationality": get_country_name(getattr(mrz, 'nationality', '')),
-            "passport_number": clean_string(getattr(mrz, 'number', '')),
-            "sex": get_sex(getattr(mrz, 'sex', '')),
-            "date_of_birth": parse_date(getattr(mrz, 'date_of_birth', '')),
-            "expiration_date": parse_date(getattr(mrz, 'expiration_date', '')),
+            "country": get_country_name(mrz_data.get('country', '')),
+            "nationality": get_country_name(mrz_data.get('nationality', '')),
+            "passport_number": clean_string(mrz_data.get('number', '')),
+            "sex": get_sex(mrz_data.get('sex', '')),
+            "date_of_birth": parse_date(mrz_data.get('date_of_birth', '')),
+            "expiration_date": parse_date(mrz_data.get('expiration_date', '')),
             "mrz_line1": line1,
             "mrz_line2": line2,
-            "valid_score": getattr(mrz, 'valid_score', 0),
+            "valid_score": mrz_data.get('valid_score', 0),
         }
         return data
 
