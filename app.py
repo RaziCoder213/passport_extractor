@@ -21,10 +21,8 @@ st.set_page_config(
 
 # Initialize Extractor (cached to avoid reloading model)
 @st.cache_resource
-def get_extractor():
-    return PassportExtractor(use_gpu=False)
-
-extractor = get_extractor()
+def get_extractor(use_gpu=False):
+    return PassportExtractor(use_gpu=use_gpu)
 
 def save_uploaded_file(uploaded_file):
     """Save uploaded file to a temporary location and return the path."""
@@ -39,139 +37,93 @@ def save_uploaded_file(uploaded_file):
 
 def main():
     st.title("🛂 Passport OCR Extractor")
+    
+    # Add a description
     st.markdown("""
-    Upload passport images (JPG, PNG) or PDFs to extract MRZ data automatically.
-    The tool extracts details like Name, Surname, Passport Number, and Date of Birth.
+    This tool extracts data from passport MRZ (Machine-Readable Zone) codes. 
+    Upload passport images or PDFs, and the app will return a structured table of the extracted information. 
+    You can also select an airline-specific format for the output data.
     """)
 
-    # Sidebar for configuration
-    st.sidebar.header("Configuration")
-    enable_validation = st.sidebar.checkbox("Enable Data Validation", value=True)
-    
-    # Format Selection
-    st.sidebar.subheader("Export Format")
-    export_format_type = st.sidebar.radio(
-        "Choose Airline Format",
-        ("Standard", "Iraqi Airways", "Flydubai"),
-        index=0
-    )
-    
+    # Sidebar Configuration
+    st.sidebar.header("Settings")
+    use_gpu = st.sidebar.checkbox("Enable GPU Acceleration", value=False)
+    airline = st.sidebar.selectbox("Choose Airline Format", ["Default", "Iraqi Airways", "Flydubai"])
+
     # File Uploader
     uploaded_files = st.file_uploader(
-        "Choose passport files", 
-        type=['png', 'jpg', 'jpeg', 'pdf'], 
+        "Upload Passport Files",
+        type=['png', 'jpg', 'jpeg', 'pdf', 'avif', 'webp', 'bmp', 'tiff'],
         accept_multiple_files=True
     )
 
     if uploaded_files:
-        st.info(f"Loaded {len(uploaded_files)} files. Click 'Process Files' to start.")
-        
-        if st.button("Process Files"):
-            results = []
+        if st.button("Extract Data"):
+            # Initialize extractor inside the button click to use the latest settings
+            extractor = PassportExtractor(use_gpu=use_gpu)
+            
+            all_results = []
             progress_bar = st.progress(0)
-            status_text = st.empty()
             
-            for idx, uploaded_file in enumerate(uploaded_files):
-                status_text.text(f"Processing {uploaded_file.name}...")
+            for i, file in enumerate(uploaded_files):
+                with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.name)[1]) as tmp:
+                    tmp.write(file.getvalue())
+                    tmp_path = tmp.name
                 
-                # Save to temp file because extractor needs a path
-                temp_path = save_uploaded_file(uploaded_file)
+                try:
+                    if file.type == "application/pdf":
+                        results = extractor.process_pdf(tmp_path)
+                    else:
+                        result = extractor.get_data(tmp_path)
+                        results = [result] if result else []
+                    
+                    for res in results:
+                        res['source_file'] = file.name
+                    all_results.extend(results)
+                finally:
+                    os.remove(tmp_path)
                 
-                if temp_path:
-                    try:
-                        # Determine if PDF based on MIME type or extension
-                        is_pdf = False
-                        if uploaded_file.type == "application/pdf":
-                            is_pdf = True
-                        elif os.path.splitext(temp_path)[1].lower() == '.pdf':
-                            is_pdf = True
-                        
-                        file_results = []
-                        
-                        if is_pdf:
-                            file_results = extractor.process_pdf(temp_path)
-                        else:
-                            # Assume it's an image
-                            data = extractor.get_data(temp_path)
-                            if data:
-                                file_results = [data]
-                        
-                        # Add validation if enabled
-                        if enable_validation:
-                            for res in file_results:
-                                errors = validate_passport_data(res)
-                                res['validation_errors'] = "; ".join(errors) if errors else "Valid"
-                        
-                        # Add original filename for reference (since we used a temp file)
-                        for res in file_results:
-                            res['original_filename'] = uploaded_file.name
-                            
-                        results.extend(file_results)
-                        
-                    except Exception as e:
-                        st.error(f"Failed to process {uploaded_file.name}: {e}")
-                    finally:
-                        # Cleanup temp file
-                        if os.path.exists(temp_path):
-                            os.remove(temp_path)
-                
-                # Update progress
-                progress_bar.progress((idx + 1) / len(uploaded_files))
+                progress_bar.progress((i + 1) / len(uploaded_files))
+
+            if not all_results:
+                st.warning("No data could be extracted. Please check the files or try again.")
+                return
+
+            # Format data based on airline selection
+            if airline == "Iraqi Airways":
+                df = format_iraqi_airways(all_results)
+            elif airline == "Flydubai":
+                df = format_flydubai(all_results)
+            else:
+                df = pd.DataFrame(all_results)
+
+            st.dataframe(df)
             
-            status_text.text("Processing complete!")
+            # Download buttons
+            col1, col2 = st.columns(2)
             
-            if results:
-                st.success(f"Successfully extracted {len(results)} records.")
-                
-                # Apply formatting based on selection
-                if export_format_type == "Iraqi Airways":
-                    df = format_iraqi_airways(results)
-                    st.info("Applying Iraqi Airways format")
-                elif export_format_type == "Flydubai":
-                    df = format_flydubai(results)
-                    st.info("Applying Flydubai format")
-                else:
-                    # Standard Format
-                    df = pd.DataFrame(results)
-                    # Reorder columns for better readability if possible
-                    cols = ['surname', 'name', 'passport_number', 'nationality', 'date_of_birth', 'sex', 'expiration_date', 'validation_errors', 'original_filename']
-                    # Add missing cols to list if they exist in df
-                    all_cols = cols + [c for c in df.columns if c not in cols]
-                    # Filter valid columns only
-                    final_cols = [c for c in all_cols if c in df.columns]
-                    df = df[final_cols]
-                
-                # Display Data
-                st.dataframe(df)
-                
-                # Download Buttons
-                col1, col2 = st.columns(2)
-                
-                # CSV Download
+            with col1:
                 csv = df.to_csv(index=False).encode('utf-8')
-                col1.download_button(
-                    label=f"Download CSV ({export_format_type})",
+                st.download_button(
+                    label="Download data as CSV",
                     data=csv,
-                    file_name=f"passport_data_{export_format_type.lower().replace(' ', '_')}.csv",
+                    file_name=f"passport_data_{airline.lower()}.csv",
                     mime="text/csv",
                 )
+            
+            with col2:
+                # Create an in-memory Excel file
+                from io import BytesIO
+                output = BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    df.to_excel(writer, index=False, sheet_name='PassportData')
                 
-                # Excel Download (requires openpyxl)
-                # Streamlit might need a BytesIO buffer for Excel
-                import io
-                buffer = io.BytesIO()
-                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                    df.to_excel(writer, index=False, sheet_name='Sheet1')
-                
-                col2.download_button(
-                    label=f"Download Excel ({export_format_type})",
-                    data=buffer.getvalue(),
-                    file_name=f"passport_data_{export_format_type.lower().replace(' ', '_')}.xlsx",
+                st.download_button(
+                    label="Download data as Excel",
+                    data=output.getvalue(),
+                    file_name=f"passport_data_{airline.lower()}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
-                
-            else:
-                st.warning("No data extracted from the provided files.")
 
 if __name__ == "__main__":
     main()
