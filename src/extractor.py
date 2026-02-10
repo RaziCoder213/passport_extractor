@@ -205,21 +205,21 @@ class PassportExtractor:
             return None
         
         # Clean name fields
-        surname = clean_name_field(mrz.surname)
-        name = clean_name_field(mrz.name)
+        surname = clean_name_field(getattr(mrz, 'surname', ''))
+        name = clean_name_field(getattr(mrz, 'name', ''))
 
         data = {
             "surname": surname,
             "name": name,
-            "country": get_country_name(mrz.country),
-            "nationality": get_country_name(mrz.nationality),
-            "passport_number": clean_string(mrz.number),
-            "sex": get_sex(mrz.sex),
-            "date_of_birth": parse_date(mrz.dob),
-            "expiration_date": parse_date(mrz.expiration_date),
+            "country": get_country_name(getattr(mrz, 'country', '')),
+            "nationality": get_country_name(getattr(mrz, 'nationality', '')),
+            "passport_number": clean_string(getattr(mrz, 'number', '')),
+            "sex": get_sex(getattr(mrz, 'sex', '')),
+            "date_of_birth": parse_date(getattr(mrz, 'dob', '')),
+            "expiration_date": parse_date(getattr(mrz, 'expiration_date', '')),
             "mrz_line1": line1,
             "mrz_line2": line2,
-            "valid_score": mrz.valid_score,
+            "valid_score": getattr(mrz, 'valid_score', 0),
         }
         return data
 
