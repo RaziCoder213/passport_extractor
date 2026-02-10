@@ -185,7 +185,7 @@ class PassportExtractor:
             logger.error(f"Error in extract_mrz_from_roi: {e}")
             return None, None, None
 
-    def get_data(self, img_path):
+    def get_data(self, img_path, airline=None):
         """
         Extracts full passport data from an image file.
         Returns a dictionary of extracted fields.
@@ -197,7 +197,55 @@ class PassportExtractor:
         line1, line2, mrz = self.extract_mrz_from_roi(img_path)
 
         if mrz is None:
-            return None
+            # Fallback if MRZ object is None but we have lines
+            if line1 and line2:
+                mrz = FallbackMRZ(line1, line2)
+            else:
+                return None
+        
+        # Clean name fields
+        surname = clean_name_field(mrz.surname)
+        name = clean_name_field(mrz.name)
+
+        data = {
+            "surname": surname,
+            "name": name,
+            "country": get_country_name(mrz.country),
+            "nationality": get_country_name(mrz.nationality),
+            "passport_number": clean_string(mrz.number),
+            "sex": get_sex(mrz.sex),
+            "date_of_birth": parse_date(mrz.dob),
+            "expiration_date": parse_date(mrz.expiration_date),
+            "mrz_line1": line1,
+            "mrz_line2": line2,
+            "valid_score": mrz.valid_score,
+        }
+        return data
+
+    def process_pdf(self, pdf_path, airline=None):
+        """
+        Extracts passport data from all pages of a PDF file.
+        Returns a list of dictionaries, one for each page with a valid MRZ.
+        """
+        if not os.path.exists(TEMP_DIR):
+            os.makedirs(TEMP_DIR)
+
+        try:
+            images = convert_from_path(pdf_path, dpi=300)
+            results = []
+            for i, img in enumerate(images):
+                page_path = os.path.join(TEMP_DIR, f"page_{i}.png")
+                img.save(page_path, 'PNG')
+                
+                data = self.get_data(page_path, airline=airline)
+                if data:
+                    data['source_page'] = i + 1
+                    results.append(data)
+            
+            return results
+        except Exception as e:
+            logger.error(f"PDF processing failed for {pdf_path}: {e}")
+            return []
 
         data = {}
         # Use PassportEye's parsing where possible, fallback/clean as needed
