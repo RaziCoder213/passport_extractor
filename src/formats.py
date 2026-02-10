@@ -129,6 +129,4 @@ def export_to_spreadsheet(data_list, output_file, format='excel'):
     except Exception as e:
         logger.error(f"Failed to export data: {e}")
         return False
-
-
-
+        
