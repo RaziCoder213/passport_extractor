@@ -40,61 +40,39 @@ def clean_string(text):
 def clean_name_field(text):
     """
     Cleans name/surname fields from MRZ.
-    Handles standard separators (<<, <) and fixes common OCR errors where fillers (<) are read as 'K'.
+    Handles separators (<<, <) and fixes OCR errors where filler '<' are read as 'K'.
+    This version is safer and targets only trailing junk 'K's.
     """
     if not text:
         return ""
     
-    # Normalize to uppercase first
     text = text.upper()
     
-    # 1. Replace << with space (standard MRZ separator)
+    # Standard MRZ separator between surname and names
     text = text.replace("<<", " ")
     
-    # 2. Replace < with space (filler within name)
+    # Find the last non-'K' character's index
+    last_good_char_idx = -1
+    for i in range(len(text) - 1, -1, -1):
+        if text[i] != 'K':
+            last_good_char_idx = i
+            break
+            
+    # If the string was all 'K's, it's empty.
+    if last_good_char_idx == -1:
+        return ""
+        
+    # Calculate how many 'K's are at the end
+    trailing_k_count = len(text) - 1 - last_good_char_idx
+    
+    # If there are 2 or more trailing 'K's, they are junk fillers. Trim them.
+    if trailing_k_count >= 2:
+        text = text[:last_good_char_idx + 1]
+        
+    # Now, any remaining single '<' characters are separators.
     text = text.replace("<", " ")
     
-    # 3. Clean up junk words (often long sequences of Ks from OCR errors)
-    words = text.split()
-    cleaned_words = []
-    
-    # Heuristic: Detect if we have a tail of single/double char junk
-    # Iterate backwards? No, let's just process forward but be aware of the "tail"
-    
-    for i, word in enumerate(words):
-        # Check if word is suspicious (mostly Ks or <s)
-        
-        # 3a. Long junk words (handles KKKKKKKKKKEKKKK)
-        if len(word) >= 3:
-            k_count = word.count('K')
-            ratio = k_count / len(word)
-            
-            # If more than 70% of the word is K, assume it's garbage and stop
-            if ratio > 0.7:
-                break
-        
-        # 3b. Sequence of short junk words (handles K K K K)
-        # If this word is short (<3 chars) and mostly K, AND all subsequent words are also junk-like?
-        # This is risky for "MARK K" (middle name K).
-        # But if we have 3 or more junk-like tokens in a row?
-        
-        # Simplified: If we see 3+ consecutive tokens that are single chars 'K', strip them.
-        # Check ahead
-        if len(word) <= 2:
-            is_junk = all(c in 'K' for c in word)
-            if is_junk:
-                junk_sequence_len = 0
-                for next_word in words[i:]:
-                    if len(next_word) <= 2 and all(c in 'K' for c in next_word):
-                        junk_sequence_len += 1
-                    else:
-                        break
-                if junk_sequence_len >= 2:
-                    break
-        
-        cleaned_words.append(word)
-            
-    return " ".join(cleaned_words).strip()
+    return text.strip()
 
 def clean_mrz_line(line: str) -> str:
     """Fix bad spacing or bad OCR for MRZ lines."""
