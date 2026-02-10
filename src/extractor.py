@@ -219,8 +219,7 @@ class PassportExtractor:
             "sex": get_sex(getattr(mrz, 'sex', '')),
             "date_of_birth": parse_date(getattr(mrz, 'date_of_birth', '')),
             "expiration_date": parse_date(getattr(mrz, 'expiration_date', '')),
-            "mrz_line1": line1,
-            "mrz_line2": line2,
+            "mrz_full_string": (line1 or "") + (line2 or ""),
             "valid_score": getattr(mrz, 'valid_score', 0),
         }
         return data
