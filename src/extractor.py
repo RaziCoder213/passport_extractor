@@ -208,11 +208,11 @@ class PassportExtractor:
         mrz_data = mrz.to_dict() if hasattr(mrz, 'to_dict') else {}
         
         surname = clean_name_field(mrz_data.get('surname', ''))
-        name = clean_name_field(mrz_data.get('name', ''))
+        name = clean_name_field(mrz_data.get('names', ''))
 
         data = {
             "surname": surname,
-            "name": name,
+            "names": name,
             "country": get_country_name(mrz_data.get('country', '')),
             "nationality": get_country_name(mrz_data.get('nationality', '')),
             "passport_number": clean_string(mrz_data.get('number', '')),
