@@ -50,6 +50,10 @@ def main():
     use_gpu = st.sidebar.checkbox("Enable GPU Acceleration", value=False)
     airline = st.sidebar.selectbox("Choose Airline Format", ["Default", "Iraqi Airways", "Flydubai"])
 
+    # Initialize session state for results
+    if 'raw_results' not in st.session_state:
+        st.session_state.raw_results = None
+
     # File Uploader
     uploaded_files = st.file_uploader(
         "Upload Passport Files",
@@ -87,43 +91,48 @@ def main():
 
             if not all_results:
                 st.warning("No data could be extracted. Please check the files or try again.")
-                return
-
-            # Format data based on airline selection
-            if airline == "Iraqi Airways":
-                df = format_iraqi_airways(all_results)
-            elif airline == "Flydubai":
-                df = format_flydubai(all_results)
+                st.session_state.raw_results = None
             else:
-                df = pd.DataFrame(all_results)
+                st.session_state.raw_results = all_results
+                st.success("Extraction Complete!")
 
-            st.dataframe(df)
+    # Display and Download (if results exist)
+    if st.session_state.raw_results:
+        # Format data based on airline selection
+        if airline == "Iraqi Airways":
+            df = format_iraqi_airways(st.session_state.raw_results)
+        elif airline == "Flydubai":
+            df = format_flydubai(st.session_state.raw_results)
+        else:
+            df = pd.DataFrame(st.session_state.raw_results)
+
+        st.dataframe(df)
+        
+        # Download buttons
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            csv = df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="Download data as CSV",
+                data=csv,
+                file_name=f"passport_data_{airline.lower()}.csv",
+                mime="text/csv",
+            )
+        
+        with col2:
+            # Create an in-memory Excel file
+            from io import BytesIO
+            output = BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df.to_excel(writer, index=False, sheet_name='PassportData')
             
-            # Download buttons
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                csv = df.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label="Download data as CSV",
-                    data=csv,
-                    file_name=f"passport_data_{airline.lower()}.csv",
-                    mime="text/csv",
-                )
-            
-            with col2:
-                # Create an in-memory Excel file
-                from io import BytesIO
-                output = BytesIO()
-                with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    df.to_excel(writer, index=False, sheet_name='PassportData')
-                
-                st.download_button(
-                    label="Download data as Excel",
-                    data=output.getvalue(),
-                    file_name=f"passport_data_{airline.lower()}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                )
+            st.download_button(
+                label="Download data as Excel",
+                data=output.getvalue(),
+                file_name=f"passport_data_{airline.lower()}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
 
 if __name__ == "__main__":
     main()
