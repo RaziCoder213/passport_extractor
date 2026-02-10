@@ -60,7 +60,7 @@ def format_flydubai(data_list):
         
         # Format dates
         dob_formatted = _to_ddmmmyy(item.get('date_of_birth', ''))
-        expiry_formatted = dob_formatted * 4
+        expiry_formatted = _to_ddmmmyy(item.get('expiration_date', ''))
         
         row = {
             "Last Name": item.get('surname', ''),
