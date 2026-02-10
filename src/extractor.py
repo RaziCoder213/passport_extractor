@@ -160,7 +160,7 @@ class PassportExtractor:
             img_resized = cv2.resize(roi, (1110, 140))
             
             # Define allowed characters for MRZ
-            allow = st.ascii_uppercase + st.digits + "<"
+            allow = st.ascii_letters + st.digits + "< "
             
             # Run EasyOCR
             code = self.reader.readtext(img_resized, detail=0, allowlist=allow)
@@ -185,7 +185,7 @@ class PassportExtractor:
             logger.error(f"Error in extract_mrz_from_roi: {e}")
             return None, None, None
 
-    def get_data(self, img_path, airline=None):
+    def get_data(self, img_path):
         """
         Extracts full passport data from an image file.
         Returns a dictionary of extracted fields.
@@ -197,58 +197,7 @@ class PassportExtractor:
         line1, line2, mrz = self.extract_mrz_from_roi(img_path)
 
         if mrz is None:
-            if line1 and line2:
-                mrz = FallbackMRZ(line1, line2)
-
-        if mrz is None:
-            logger.warning(f"Could not extract a valid MRZ from {img_path}")
             return None
-        
-        # Safely get data from MRZ object
-        mrz_data = mrz.to_dict() if hasattr(mrz, 'to_dict') else {}
-        
-        surname = clean_name_field(mrz_data.get('surname', ''))
-        name = clean_name_field(mrz_data.get('name', ''))
-
-        data = {
-            "surname": surname,
-            "name": name,
-            "country": get_country_name(mrz_data.get('country', '')),
-            "nationality": get_country_name(mrz_data.get('nationality', '')),
-            "passport_number": clean_string(mrz_data.get('number', '')),
-            "sex": get_sex(mrz_data.get('sex', '')),
-            "date_of_birth": parse_date(mrz_data.get('date_of_birth', '')),
-            "expiration_date": parse_date(mrz_data.get('expiration_date', '')),
-            "mrz_line1": line1,
-            "mrz_line2": line2,
-            "valid_score": mrz_data.get('valid_score', 0),
-        }
-        return data
-
-    def process_pdf(self, pdf_path, airline=None):
-        """
-        Extracts passport data from all pages of a PDF file.
-        Returns a list of dictionaries, one for each page with a valid MRZ.
-        """
-        if not os.path.exists(TEMP_DIR):
-            os.makedirs(TEMP_DIR)
-
-        try:
-            images = convert_from_path(pdf_path, dpi=300)
-            results = []
-            for i, img in enumerate(images):
-                page_path = os.path.join(TEMP_DIR, f"page_{i}.png")
-                img.save(page_path, 'PNG')
-                
-                data = self.get_data(page_path, airline=airline)
-                if data:
-                    data['source_page'] = i + 1
-                    results.append(data)
-            
-            return results
-        except Exception as e:
-            logger.error(f"PDF processing failed for {pdf_path}: {e}")
-            return []
 
         data = {}
         # Use PassportEye's parsing where possible, fallback/clean as needed
