@@ -215,7 +215,7 @@ class PassportExtractor:
             "nationality": get_country_name(getattr(mrz, 'nationality', '')),
             "passport_number": clean_string(getattr(mrz, 'number', '')),
             "sex": get_sex(getattr(mrz, 'sex', '')),
-            "date_of_birth": parse_date(getattr(mrz, 'dob', '')),
+            "date_of_birth": parse_date(getattr(mrz, 'date_of_birth', '')),
             "expiration_date": parse_date(getattr(mrz, 'expiration_date', '')),
             "mrz_line1": line1,
             "mrz_line2": line2,
