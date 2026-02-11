@@ -153,7 +153,21 @@ class PassportExtractor:
 
         if mrz is None:
             logger.warning("MRZ not detected.")
-            return None
+            # Return data with placeholder values instead of None
+            return {
+                "surname": "•••",
+                "name": "•••",
+                "country": "•••",
+                "nationality": "•••",
+                "passport_number": "•••",
+                "sex": "•••",
+                "date_of_birth": "•••",
+                "expiration_date": "•••",
+                "personal_number": "•••",
+                "mrz_full_string": "",
+                "valid_score": 0,
+                "mrz_found": False
+            }
 
         surname = clean_name_field(getattr(mrz, "surname", ""))
 
@@ -181,6 +195,7 @@ class PassportExtractor:
             "expiration_date": parse_date(getattr(mrz, "expiration_date", ""), airline=airline),
             "mrz_full_string": (line1 or "") + (line2 or ""),
             "valid_score": getattr(mrz, "valid_score", 0),
+            "mrz_found": True,
         }
 
         return data
