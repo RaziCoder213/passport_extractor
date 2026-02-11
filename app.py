@@ -11,6 +11,50 @@ import time
 from src.extractor import PassportExtractor
 from src.validators import validate_passport_data
 from src.formats import format_iraqi_airways, format_flydubai
+from src.utils import parse_date
+
+
+def process_pdf_file(uploaded_file, use_gpu=False, airline="flydubai"):
+    """
+    Process a single uploaded PDF file and extract passport data.
+
+    Args:
+        uploaded_file: Uploaded file object (Streamlit or similar)
+        use_gpu (bool): Whether to use GPU acceleration
+        airline (str): Airline format for date formatting ("flydubai", "default", "iraqi airways")
+
+    Returns:
+        List[dict]: Extracted passport data for each page/passport
+    """
+    extractor = PassportExtractor(use_gpu=use_gpu)
+    results = []
+
+    # Save uploaded file to temporary location
+    suffix = os.path.splitext(uploaded_file.name)[1]
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(uploaded_file.getvalue())
+        tmp_path = tmp.name
+
+    try:
+        # Extract passport data from PDF with airline-specific formatting
+        results = extractor.process_pdf(tmp_path, airline=airline.lower())
+        if not results:
+            print(f"⚠️ No passport data found in PDF: {uploaded_file.name}")
+
+        # Attach source file name to each result
+        for res in results:
+            res['source_file'] = uploaded_file.name
+
+    except Exception as e:
+        print(f"❌ Error processing {uploaded_file.name}: {str(e)}")
+        results = []
+
+    finally:
+        # Clean up temp file
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+    return results
 
 # Set page configuration
 st.set_page_config(
@@ -80,9 +124,6 @@ def main():
                     tmp.write(file.getvalue())
                     tmp_path = tmp.name
                 
-                # Create a progress container for PDF processing
-                pdf_progress_container = st.empty()
-                
                 try:
                     # Check both MIME type and file extension for PDF detection
                     is_pdf = file.type == "application/pdf" or file.name.lower().endswith('.pdf')
@@ -90,23 +131,18 @@ def main():
                     if is_pdf:
                         st.write(f"📄 Processing as PDF: {file.name} (type: {file.type})")
                         
-                        # Progress callback for PDF processing
-                        def update_pdf_progress(progress):
-                            pdf_progress_container.progress(progress)
-                        
                         try:
-                            results = extractor.process_pdf(tmp_path, progress_callback=update_pdf_progress)
+                            # Use the new standalone PDF processing function
+                            results = process_pdf_file(file, use_gpu=use_gpu, airline=airline.lower())
                             if not results:
                                 st.warning(f"⚠️ No passport data found in PDF: {file.name}")
                         except Exception as e:
                             st.error(f"❌ PDF processing failed for {file.name}: {str(e)}")
                             results = []
-                        finally:
-                            pdf_progress_container.empty()  # Clear the progress bar
                             
                     else:
                         st.write(f"🖼️ Processing as image: {file.name} (type: {file.type})")
-                        result = extractor.get_data(tmp_path)
+                        result = extractor.get_data(tmp_path, airline=airline.lower())
                         results = [result] if result else []
                         if not results:
                             st.warning(f"⚠️ No passport data found in image: {file.name}")
