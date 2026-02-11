@@ -155,45 +155,40 @@ def main():
                         is_pdf = file.type == "application/pdf" or file.name.lower().endswith('.pdf')
                         
                         if is_pdf:
-                            st.write(f"📄 Processing as PDF: {file.name} (type: {file.type})")
-                            
                             try:
                                 # Use the new standalone PDF processing function
                                 results = process_pdf_file(file, use_gpu=use_gpu, airline=airline.lower())
-                                if not results:
-                                    st.warning(f"⚠️ No passport data found in PDF: {file.name}")
                             except Exception as e:
-                                st.error(f"❌ PDF processing failed for {file.name}: {str(e)}")
                                 results = []
                                 
                         else:
-                            st.write(f"🖼️ Processing as image: {file.name} (type: {file.type})")
                             result = extractor.get_data(tmp_path, airline=airline.lower())
                             results = [result] if result else []
-                            if not results:
-                                st.warning(f"⚠️ No passport data found in image: {file.name}")
                         
                         for res in results:
                             res['source_file'] = file.name
                         all_results.extend(results)
                         
                     except Exception as e:
-                        st.error(f"❌ Error processing {file.name}: {str(e)}")
-                        import traceback
-                        st.error(f"Debug info: {traceback.format_exc()}")
+                        # Silently skip failed files for cleaner UI
+                        pass
                         
                     finally:
                         # Safely remove temp file
                         try:
                             if os.path.exists(tmp_path):
                                 os.remove(tmp_path)
-                        except Exception as cleanup_error:
-                            st.warning(f"Warning: Could not clean up temp file: {cleanup_error}")
+                        except:
+                            pass
                     
                     # Update main progress bar - use container to avoid state issues
                     with progress_container:
                         main_progress_bar.progress((i + 1) / len(uploaded_files))
 
+                # Show results only after all processing is complete
+                successful_files = len(set(result.get('source_file', '') for result in all_results))
+                st.success(f"✅ Successfully processed {successful_files} of {len(uploaded_files)} files")
+                
                 if not all_results:
                     st.warning("No data could be extracted. Please check the files or try again.")
                     st.session_state.processing = False
@@ -209,6 +204,32 @@ def main():
 
                 st.dataframe(df)
                 
+                # Download buttons - moved inside try block where df is guaranteed to be defined
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    csv = df.to_csv(index=False).encode('utf-8')
+                    st.download_button(
+                        label="Download data as CSV",
+                        data=csv,
+                        file_name=f"passport_data_{airline.lower()}.csv",
+                        mime="text/csv",
+                    )
+                
+                with col2:
+                    # Create an in-memory Excel file
+                    from io import BytesIO
+                    output = BytesIO()
+                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                        df.to_excel(writer, index=False, sheet_name='PassportData')
+                    
+                    st.download_button(
+                        label="Download data as Excel",
+                        data=output.getvalue(),
+                        file_name=f"passport_data_{airline.lower()}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
+                
                 # Reset processing state
                 st.session_state.processing = False
                 
@@ -221,33 +242,7 @@ def main():
             finally:
                 # Ensure processing state is reset even if an error occurs
                 if 'processing' in st.session_state:
-                    st.session_state.processing = False 
-            
-            # Download buttons
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                csv = df.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label="Download data as CSV",
-                    data=csv,
-                    file_name=f"passport_data_{airline.lower()}.csv",
-                    mime="text/csv",
-                )
-            
-            with col2:
-                # Create an in-memory Excel file
-                from io import BytesIO
-                output = BytesIO()
-                with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    df.to_excel(writer, index=False, sheet_name='PassportData')
-                
-                st.download_button(
-                    label="Download data as Excel",
-                    data=output.getvalue(),
-                    file_name=f"passport_data_{airline.lower()}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                )
+                    st.session_state.processing = False
 
 if __name__ == "__main__":
     main()
