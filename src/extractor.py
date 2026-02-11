@@ -340,23 +340,38 @@ class PassportExtractor:
         (not from MRZ). Looks for 'Given Name' or 'Given Names' field.
         """
         try:
-            # Preprocess image for better OCR accuracy
+            # Load the original image
             original_img = cv2.imread(img_path)
-            if original_img is not None:
-                processed_img = self.preprocess_for_ocr(original_img)
-                # Save processed image temporarily for OCR
-                temp_processed_path = img_path.replace('.jpg', '_processed.jpg').replace('.png', '_processed.png')
-                cv2.imwrite(temp_processed_path, processed_img)
-                
-                # Read the processed image with EasyOCR
-                results = self.reader.readtext(temp_processed_path)
-                
-                # Cleanup temp file
-                if os.path.exists(temp_processed_path):
-                    os.remove(temp_processed_path)
+            if original_img is None:
+                logger.error(f"Failed to load image: {img_path}")
+                return None
+            
+            # Detect text regions in the image
+            text_regions = self.detect_text_regions(original_img)
+            
+            # Extract name-specific region for better OCR focus
+            name_region = self.extract_name_region(original_img, text_regions)
+            
+            # Preprocess image for better OCR accuracy
+            if name_region is not None:
+                # Use the name-specific region if detected
+                processed_img = self.preprocess_for_ocr(name_region)
+                logger.info("Using name-specific region for OCR")
             else:
-                # Fallback to original if preprocessing fails
-                results = self.reader.readtext(img_path)
+                # Fallback to full image preprocessing
+                processed_img = self.preprocess_for_ocr(original_img)
+                logger.info("Using full image for OCR")
+            
+            # Save processed image temporarily for OCR
+            temp_processed_path = img_path.replace('.jpg', '_processed.jpg').replace('.png', '_processed.png')
+            cv2.imwrite(temp_processed_path, processed_img)
+            
+            # Read the processed image with EasyOCR
+            results = self.reader.readtext(temp_processed_path)
+            
+            # Cleanup temp file
+            if os.path.exists(temp_processed_path):
+                os.remove(temp_processed_path)
             
             # Convert results to text lines for easier processing
             text_lines = []
