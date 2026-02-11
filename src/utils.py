@@ -76,6 +76,9 @@ def clean_name_field(text):
     # Now, any remaining single '<' characters are separators.
     text = text.replace("<", " ")
     
+    # Remove any numbers from the name
+    text = ''.join(char for char in text if not char.isdigit())
+    
     return text.strip()
 
 def clean_mrz_line(line: str) -> str:
