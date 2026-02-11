@@ -149,15 +149,36 @@ class PassportExtractor:
                     roi = roi.astype(np.uint8)
 
             # Preprocess ROI for EasyOCR
-            # Original code: saved to tmp.png (gray), read back, resized to (1110, 140)
-            # We will try to do this in memory using OpenCV
-            
-            # roi is likely a numpy array (H, W) or (H, W, C). PassportEye usually returns grayscale for ROI?
-            # Let's normalize to BGR for OpenCV consistency if needed, or keep grayscale.
-            
-            # Resize to improve OCR accuracy as per original code logic
-            # Note: (1110, 140) is the target size (Width, Height)
-            img_resized = cv2.resize(roi, (1110, 140))
+            # Convert to grayscale if needed
+            if len(roi.shape) == 3:
+                gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+            else:
+                gray = roi
+
+            # Resize while preserving aspect ratio
+            h, w = gray.shape
+            scale = 140 / h
+            new_w = int(w * scale)
+            resized = cv2.resize(gray, (new_w, 140))
+
+            # Gaussian blur (removes dot noise)
+            blur = cv2.GaussianBlur(resized, (3, 3), 0)
+
+            # Adaptive threshold (VERY IMPORTANT)
+            thresh = cv2.adaptiveThreshold(
+                blur,
+                255,
+                cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                cv2.THRESH_BINARY,
+                31,
+                2
+            )
+
+            # Morphological close to fix broken characters
+            kernel = np.ones((2,2), np.uint8)
+            processed = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+
+            img_resized = processed
             
             # Define allowed characters for MRZ
             allow = st.ascii_uppercase + st.digits + "<"
