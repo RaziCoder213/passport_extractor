@@ -46,10 +46,16 @@ class PassportExtractor:
         os.makedirs(model_dir, exist_ok=True)
 
         logger.info(f"Initializing EasyOCR Reader (GPU={use_gpu})...")
+        
+        # Create custom user network directory to avoid permission issues
+        user_network_dir = os.path.join(base_dir, "data", "easyocr_user_network")
+        os.makedirs(user_network_dir, exist_ok=True)
+        
         self.reader = easyocr.Reader(
             self.languages,
             gpu=use_gpu,
-            model_storage_directory=model_dir
+            model_storage_directory=model_dir,
+            user_network_directory=user_network_dir
         )
         logger.info("EasyOCR initialized.")
 
