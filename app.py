@@ -79,9 +79,13 @@ def main():
                     
                     if is_pdf:
                         st.write(f"Processing as PDF: {file.name} (type: {file.type})")
-                        results = extractor.process_pdf(tmp_path)
-                        if not results:
-                            st.warning(f"⚠️ No passport data found in PDF: {file.name}")
+                        try:
+                            results = extractor.process_pdf(tmp_path)
+                            if not results:
+                                st.warning(f"⚠️ No passport data found in PDF: {file.name}")
+                        except Exception as e:
+                            st.error(f"❌ PDF processing failed for {file.name}: {str(e)}")
+                            results = []
                     else:
                         st.write(f"Processing as image: {file.name} (type: {file.type})")
                         result = extractor.get_data(tmp_path)
