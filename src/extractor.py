@@ -236,6 +236,9 @@ class PassportExtractor:
                                 given_name = parts.split('NAME')[1].strip()
                             elif 'NAMES' in parts:
                                 given_name = parts.split('NAMES')[1].strip()
+                            else:
+                                # If no NAME/NAMES found, use everything after GIVEN
+                                given_name = parts.strip()
                             
                             # If no name found after splitting, try next line
                             if not given_name and i + 1 < len(text_lines):
@@ -416,4 +419,3 @@ class PassportExtractor:
                 os.remove(temp_img_path)
 
         return extracted_data
-
