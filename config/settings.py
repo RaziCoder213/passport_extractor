@@ -18,7 +18,7 @@ ALLOWED_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.pdf'}
 
 # OCR Settings
 OCR_LANGUAGES = ['en']
-USE_GPU = False  # Set to True if you have CUDA installed
+USE_GPU = True  # Always enabled for better performance
 
 # Country Codes (ISO 3166-1 alpha-3)
 # This is a subset. In a real production app, consider loading this from a standard library or full JSON file.
