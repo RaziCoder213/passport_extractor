@@ -213,6 +213,59 @@ class PassportExtractor:
             logger.warning(f"Image preprocessing failed, using original: {e}")
             return img
 
+    def correct_common_ocr_errors(self, text):
+        """
+        Correct common OCR errors in passport text
+        """
+        if not text:
+            return text
+        
+        # Common OCR substitutions in passport context
+        corrections = {
+            '0': 'O',  # Zero to letter O
+            '1': 'I',  # One to letter I
+            '5': 'S',  # Five to letter S
+            '8': 'B',  # Eight to letter B
+            '2': 'Z',  # Two to letter Z (in some contexts)
+            '6': 'G',  # Six to letter G
+            '7': 'T',  # Seven to letter T
+        }
+        
+        # Apply corrections only for single characters that are clearly errors
+        corrected_text = ""
+        for char in text:
+            if char in corrections and len(text) > 1:
+                # Only correct if it makes sense in context (e.g., not in numbers)
+                if not text.isdigit():
+                    corrected_text += corrections[char]
+                else:
+                    corrected_text += char
+            else:
+                corrected_text += char
+        
+        return corrected_text
+    
+    def correct_name_patterns(self, name):
+        """
+        Apply pattern-based corrections for common name OCR errors
+        """
+        if not name:
+            return name
+        
+        # Common name pattern corrections
+        name = re.sub(r'\bAHMED\b', 'AHMED', name, flags=re.IGNORECASE)
+        name = re.sub(r'\bMOHAMMED\b', 'MOHAMMED', name, flags=re.IGNORECASE)
+        name = re.sub(r'\bMOHAMED\b', 'MOHAMED', name, flags=re.IGNORECASE)
+        name = re.sub(r'\bMUHAMMAD\b', 'MUHAMMAD', name, flags=re.IGNORECASE)
+        
+        # Remove multiple spaces
+        name = re.sub(r'\s+', ' ', name)
+        
+        # Ensure proper spacing around initials
+        name = re.sub(r'([A-Z])\.?([A-Z])', r'\1 \2', name)
+        
+        return name.strip()
+
     def extract_given_name_from_visual_zone(self, img_path):
         """
         Extracts the given name from the visual inspection zone of the passport
