@@ -25,6 +25,7 @@ from config.settings import USE_GPU, OCR_LANGUAGES, TEMP_DIR
 warnings.filterwarnings("ignore")
 logger = setup_logger(__name__)
 
+
 # Fix SSL issue (Mac EasyOCR model download fix)
 try:
     _create_unverified_https_context = ssl._create_unverified_context
@@ -72,48 +73,19 @@ class PassportExtractor:
                         else:
                             return ""
 
-                    # Keep letters and spaces only
+                    # Keep only letters and spaces
                     candidate = re.sub(r'[^A-Za-z\s]', '', candidate)
 
-                    # Remove trailing accidental single letter
+                    # Remove trailing single letter (e.g. IBRAHEEMK → IBRAHEEM)
                     candidate = re.sub(r'([A-Z]{3,})[A-Z]$', r'\1', candidate)
 
-                    return candidate.strip().upper()
+                    return candidate.strip()
 
             return ""
 
         except Exception as e:
             logger.error(f"Given Names extraction failed: {e}")
             return ""
-
-    # ---------------------------------------------------
-    # REBUILD MRZ LINE1 USING VISUAL NAME (ICAO TD3 SAFE)
-    # ---------------------------------------------------
-    def rebuild_mrz_with_visual_name(self, line1, visual_given_names):
-
-        if not line1 or len(line1) != 44:
-            return line1  # safety fallback
-
-        document_code = line1[:2]     # P<
-        country_code = line1[2:5]     # ISO code
-        name_section = line1[5:]
-
-        if "<<" not in name_section:
-            return line1  # malformed MRZ
-
-        surname_part = name_section.split("<<")[0]
-
-        # Convert visual name to MRZ format
-        visual_mrz_name = visual_given_names.replace(" ", "<")
-
-        new_name_section = surname_part + "<<" + visual_mrz_name
-
-        rebuilt_line = document_code + country_code + new_name_section
-
-        # Ensure exactly 44 chars
-        rebuilt_line = rebuilt_line[:44].ljust(44, "<")
-
-        return rebuilt_line
 
     # ---------------------------------------------------
     # MRZ EXTRACTION
@@ -162,24 +134,17 @@ class PassportExtractor:
 
         line1, line2, mrz = self.extract_mrz_from_roi(img_path)
 
+        if line1 and line2:
+            mrz = FallbackMRZ(line1, line2)
+
         if mrz is None:
             logger.warning("MRZ not detected.")
             return None
 
-        # 🔥 Get visual name first
-        visual_name = self.extract_given_names_from_visual(img_path)
-
-        # 🔥 Rebuild MRZ safely if visual name exists
-        if line1 and line2:
-            if visual_name:
-                line1 = self.rebuild_mrz_with_visual_name(
-                    line1,
-                    visual_name
-                )
-
-            mrz = FallbackMRZ(line1, line2)
-
         surname = clean_name_field(getattr(mrz, "surname", ""))
+
+        # 🔥 ALWAYS prefer visual name
+        visual_name = self.extract_given_names_from_visual(img_path)
 
         if visual_name:
             name = visual_name
@@ -187,6 +152,9 @@ class PassportExtractor:
             name = clean_name_field(
                 getattr(mrz, "names", getattr(mrz, "name", ""))
             )
+
+            # Final defensive cleanup
+            name = re.sub(r'([A-Z]{3,})[A-Z]$', r'\1', name)
 
         data = {
             "surname": surname,
@@ -202,33 +170,3 @@ class PassportExtractor:
         }
 
         return data
-
-    # ---------------------------------------------------
-    # PDF PROCESSING
-    # ---------------------------------------------------
-    def process_pdf(self, pdf_path):
-        extracted_data = []
-        os.makedirs(TEMP_DIR, exist_ok=True)
-
-        try:
-            pages = convert_from_path(pdf_path, dpi=300)
-        except Exception as e:
-            logger.error(f"PDF conversion failed: {e}")
-            return []
-
-        for i, page in enumerate(pages):
-            temp_img_path = os.path.join(
-                TEMP_DIR, f"temp_page_{i+1}.png"
-            )
-            page.save(temp_img_path, "PNG")
-
-            result = self.get_data(temp_img_path)
-
-            if result:
-                result["source_page"] = i + 1
-                extracted_data.append(result)
-
-            if os.path.exists(temp_img_path):
-                os.remove(temp_img_path)
-
-        return extracted_data
