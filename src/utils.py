@@ -38,18 +38,33 @@ def clean_string(text):
     return ''.join(i for i in text if i.isalnum()).upper()
 
 def clean_name_field(text):
+    """
+    Clean name field by removing noise and extra characters.
+    Only removes junk, doesn't add or replace characters.
+    """
     if not text:
         return ""
-
-    text = text.upper()
-
-    # Split using MRZ structure
-    parts = text.split('<')
-
-    # Keep only alphabetic chunks
-    parts = [p for p in parts if p.isalpha()]
-
-    return " ".join(parts)
+    
+    text = text.upper().strip()
+    
+    # Remove trailing repeated characters (like KKKKKK)
+    if len(text) > 2:
+        # Check if last 3+ characters are the same (likely noise)
+        last_char = text[-1]
+        if text[-3:] == last_char * 3:
+            # Find where the repetition starts
+            for i in range(len(text)-1, -1, -1):
+                if text[i] != last_char:
+                    text = text[:i+1]
+                    break
+    
+    # Remove any non-alphabetic characters except spaces
+    cleaned = ''.join(c if c.isalpha() or c == ' ' else ' ' for c in text)
+    
+    # Remove extra spaces
+    cleaned = ' '.join(cleaned.split())
+    
+    return cleaned
 
 def clean_mrz_line(line: str) -> str:
     """Fix bad spacing or bad OCR for MRZ lines."""
@@ -86,27 +101,3 @@ def get_sex(code):
         return 'M' # Fallback based on existing logic
     return code
 
-def correct_mrz_line1(line):
-    """For MRZ line 1 (name line). Only fix fake separator characters."""
-    replacements = {
-        'K': '<', 'X': '<', 'C': '<'
-    }
-    return ''.join(replacements.get(c, c) for c in line)
-
-def correct_mrz_line2(line):
-    """For MRZ line 2 (numeric-heavy line). Fix numeric/letter confusion."""
-    replacements = {
-        'O': '0', 'Q': '0', 'I': '1', 'Z': '2', 'S': '5', 'B': '8'
-    }
-    return ''.join(replacements.get(c, c) for c in line)
-
-def strict_mrz_filter(line):
-    """Strict character enforcement for MRZ lines."""
-    if not line:
-        return ""
-    
-    # Allow only uppercase letters, digits, and '<'
-    allowed = set(st.ascii_uppercase + st.digits + "<")
-    filtered = ''.join(c for c in line if c in allowed)
-    
-    return filtered
