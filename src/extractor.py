@@ -206,34 +206,49 @@ class PassportExtractor:
             for i, line in enumerate(text_lines):
                 # Look for "Given Name" or "Given Names" field
                 if 'GIVEN' in line and ('NAME' in line or 'NAMES' in line):
-                    # The actual name is usually on the same line after the field name
-                    # or on the next line
-                    if i + 1 < len(text_lines):
-                        given_name = text_lines[i + 1]
-                    else:
-                        # Try to extract from the same line
-                        parts = line.split('GIVEN')[1]  # Get text after "GIVEN"
-                        if 'NAME' in parts:
-                            given_name = parts.split('NAME')[1].strip()
-                        elif 'NAMES' in parts:
-                            given_name = parts.split('NAMES')[1].strip()
-                    break
-                
-                # Alternative: look for patterns like "Given Name: JOHN"
-                if 'GIVEN' in line and ('NAME' in line or 'NAMES' in line):
-                    # Check if there's a colon or other separator
+                    # Check if name is on the same line with colon separator
                     if ':' in line:
-                        given_name = line.split(':')[-1].strip()
+                        parts = line.split(':', 1)
+                        if len(parts) > 1 and parts[1].strip():
+                            given_name = parts[1].strip()
+                        else:
+                            # Name might be on next line
+                            if i + 1 < len(text_lines):
+                                given_name = text_lines[i + 1]
                     elif line.endswith('GIVEN NAME') or line.endswith('GIVEN NAMES'):
                         # Name might be on next line
                         if i + 1 < len(text_lines):
                             given_name = text_lines[i + 1]
+                    else:
+                        # Try to extract from the same line
+                        try:
+                            parts = line.split('GIVEN')[1]  # Get text after "GIVEN"
+                            if 'NAME' in parts:
+                                given_name = parts.split('NAME')[1].strip()
+                            elif 'NAMES' in parts:
+                                given_name = parts.split('NAMES')[1].strip()
+                            
+                            # If no name found after splitting, try next line
+                            if not given_name and i + 1 < len(text_lines):
+                                given_name = text_lines[i + 1]
+                        except IndexError:
+                            # If split fails, try next line
+                            if i + 1 < len(text_lines):
+                                given_name = text_lines[i + 1]
+                    break
             
             if given_name:
                 # Clean the extracted name
                 given_name = given_name.strip()
                 # Remove common field labels that might have been captured
                 given_name = re.sub(r'^(NAME|NAMES|SURNAME|GIVEN)\s*[:\-]?\s*', '', given_name, flags=re.IGNORECASE)
+                # Remove any remaining common prefixes
+                given_name = re.sub(r'^(SURNAME|FAMILY NAME|LAST NAME)\s*[:\-]?\s*', '', given_name, flags=re.IGNORECASE)
+                
+                # If the name is too long or contains unusual characters, it might be a false positive
+                if len(given_name) > 50 or any(char.isdigit() for char in given_name):
+                    return None
+                    
                 return given_name
                 
         except Exception as e:
@@ -390,4 +405,3 @@ class PassportExtractor:
                 os.remove(temp_img_path)
 
         return extracted_data
-
