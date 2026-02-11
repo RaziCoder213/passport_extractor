@@ -72,6 +72,11 @@ def clean_name_field(text):
     # Now, any remaining single '<' characters are separators.
     text = text.replace("<", " ")
     
+    # 5. Filter out any characters that are not uppercase letters or spaces
+    # This will remove stray digits (like '8') or other symbols from name fields.
+    allowed_name_chars = set(st.ascii_uppercase + " ")
+    text = "".join([c for c in text if c in allowed_name_chars])
+    
     return text.strip()
 
 def clean_mrz_line(line: str) -> str:
