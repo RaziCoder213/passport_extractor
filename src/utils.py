@@ -2,6 +2,7 @@ import string as st
 from dateutil import parser
 import logging
 import sys
+import re
 from config.settings import COUNTRY_CODES
 
 def setup_logger(name=__name__):
@@ -18,26 +19,16 @@ def setup_logger(name=__name__):
 logger = setup_logger(__name__)
 
 def parse_date(date_obj, iob=True):
-    """Parses a date object or string into DD/MM/YYYY format."""
+    """Parses a date object or string into DD MON YY format (flydubai format)."""
     try:
         date_str = date_obj.isoformat() if hasattr(date_obj, 'isoformat') else str(date_obj)
         # Passport dates are often YYMMDD, but dateutil usually handles it if formatted correctly.
         # However, MRZ dates are tricky. PassportEye usually returns YYMMDD.
         # parser.parse might struggle with 2-digit years without context, but let's trust existing logic first.
         date = parser.parse(date_str, yearfirst=True).date()
-        return date.strftime('%d/%m/%Y')
+        return date.strftime('%d%b%y').upper()
     except (ValueError, TypeError) as e:
         logger.debug(f"Date parsing failed for {date_obj}: {e}")
-        return str(date_obj)
-
-def format_date_flydubai(date_obj):
-    """Formats a date object or string into FlyDubai format (DDMMMYYformat e.g., 13NOV84)."""
-    try:
-        date_str = date_obj.isoformat() if hasattr(date_obj, 'isoformat') else str(date_obj)
-        date = parser.parse(date_str, yearfirst=True).date()
-        return date.strftime('%d%b%Y').upper()[:8]  # Format: 13NOV84 (8 chars: 2 digits + 3 letters + 2 digits)
-    except (ValueError, TypeError) as e:
-        logger.debug(f"Date formatting failed for {date_obj}: {e}")
         return str(date_obj)
 
 def clean_string(text):
@@ -45,6 +36,43 @@ def clean_string(text):
     if not text:
         return ""
     return ''.join(i for i in text if i.isalnum()).upper()
+
+def clean_name_field(text):
+    """
+    Cleans name/surname fields from MRZ.
+    Handles separators (<<, <) and fixes OCR errors where filler '<' are read as 'K'.
+    This version is safer and targets only trailing junk 'K's.
+    """
+    if not text:
+        return ""
+    
+    text = text.upper()
+    
+    # Standard MRZ separator between surname and names
+    text = text.replace("<<", " ")
+    
+    # Find the last non-'K' character's index
+    last_good_char_idx = -1
+    for i in range(len(text) - 1, -1, -1):
+        if text[i] != 'K':
+            last_good_char_idx = i
+            break
+            
+    # If the string was all 'K's, it's empty.
+    if last_good_char_idx == -1:
+        return ""
+        
+    # Calculate how many 'K's are at the end
+    trailing_k_count = len(text) - 1 - last_good_char_idx
+    
+    # If there are 2 or more trailing 'K's, they are junk fillers. Trim them.
+    if trailing_k_count >= 2:
+        text = text[:last_good_char_idx + 1]
+        
+    # Now, any remaining single '<' characters are separators.
+    text = text.replace("<", " ")
+    
+    return text.strip()
 
 def clean_mrz_line(line: str) -> str:
     """Fix bad spacing or bad OCR for MRZ lines."""
@@ -80,3 +108,40 @@ def get_sex(code):
     if code == '0':
         return 'M' # Fallback based on existing logic
     return code
+
+def parse_barcode_data(barcode_data):
+    """
+    Parse PDF417 barcode data from passport.
+    Handles various formats from different countries.
+    """
+    try:
+        lines = barcode_data.split('\n')
+        if len(lines) < 2:
+            return None
+        
+        # Extract names from first line
+        name_line = lines[0].replace('@','').replace('<',' ').strip()
+        surname, given_names = name_line.split(' ', 1) if ' ' in name_line else (name_line, '')
+        
+        # Parse remaining fields (simplified format)
+        if len(lines[1]) >= 25:
+            passport_number = lines[1][:9].strip()
+            nationality = lines[1][9:12].strip()
+            dob = parse_date(lines[1][12:18])
+            sex = lines[1][18]
+            expiry = parse_date(lines[1][19:25])
+            
+            return {
+                "surname": clean_name_field(surname),
+                "given_names": clean_name_field(given_names),
+                "passport_number": passport_number,
+                "nationality": nationality,
+                "sex": sex,
+                "date_of_birth": dob,
+                "expiration_date": expiry,
+                "barcode_data": barcode_data
+            }
+        return None
+    except Exception as e:
+        logger.error(f"Error parsing barcode data: {e}")
+        return None
