@@ -38,41 +38,18 @@ def clean_string(text):
     return ''.join(i for i in text if i.isalnum()).upper()
 
 def clean_name_field(text):
-    """
-    Cleans name/surname fields from MRZ.
-    Handles separators (<<, <) and fixes OCR errors where filler '<' are read as 'K'.
-    This version is safer and targets only trailing junk 'K's.
-    """
     if not text:
         return ""
-    
+
     text = text.upper()
-    
-    # Standard MRZ separator between surname and names
-    text = text.replace("<<", " ")
-    
-    # Find the last non-'K' character's index
-    last_good_char_idx = -1
-    for i in range(len(text) - 1, -1, -1):
-        if text[i] != 'K':
-            last_good_char_idx = i
-            break
-            
-    # If the string was all 'K's, it's empty.
-    if last_good_char_idx == -1:
-        return ""
-        
-    # Calculate how many 'K's are at the end
-    trailing_k_count = len(text) - 1 - last_good_char_idx
-    
-    # If there are 2 or more trailing 'K's, they are junk fillers. Trim them.
-    if trailing_k_count >= 2:
-        text = text[:last_good_char_idx + 1]
-        
-    # Now, any remaining single '<' characters are separators.
-    text = text.replace("<", " ")
-    
-    return text.strip()
+
+    # Split using MRZ structure
+    parts = text.split('<')
+
+    # Keep only alphabetic chunks
+    parts = [p for p in parts if p.isalpha()]
+
+    return " ".join(parts)
 
 def clean_mrz_line(line: str) -> str:
     """Fix bad spacing or bad OCR for MRZ lines."""
@@ -108,3 +85,28 @@ def get_sex(code):
     if code == '0':
         return 'M' # Fallback based on existing logic
     return code
+
+def correct_mrz_line1(line):
+    """For MRZ line 1 (name line). Only fix fake separator characters."""
+    replacements = {
+        'K': '<', 'X': '<', 'C': '<'
+    }
+    return ''.join(replacements.get(c, c) for c in line)
+
+def correct_mrz_line2(line):
+    """For MRZ line 2 (numeric-heavy line). Fix numeric/letter confusion."""
+    replacements = {
+        'O': '0', 'Q': '0', 'I': '1', 'Z': '2', 'S': '5', 'B': '8'
+    }
+    return ''.join(replacements.get(c, c) for c in line)
+
+def strict_mrz_filter(line):
+    """Strict character enforcement for MRZ lines."""
+    if not line:
+        return ""
+    
+    # Allow only uppercase letters, digits, and '<'
+    allowed = set(st.ascii_uppercase + st.digits + "<")
+    filtered = ''.join(c for c in line if c in allowed)
+    
+    return filtered
