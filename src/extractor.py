@@ -24,10 +24,7 @@ from src.utils import (
     get_country_name, 
     get_sex, 
     setup_logger,
-    clean_name_field,
-    correct_mrz_line1,
-    correct_mrz_line2,
-    strict_mrz_filter
+    clean_name_field
 )
 from src.fallback_mrz import FallbackMRZ
 from config.settings import USE_GPU, OCR_LANGUAGES, TEMP_DIR
@@ -201,11 +198,8 @@ class PassportExtractor:
                 logger.warning(f"EasyOCR found fewer than 2 lines in ROI for {img_path}")
                 return None, None, mrz
 
-            line1 = correct_mrz_line1(clean_mrz_line(code[0]))
-            line2 = correct_mrz_line2(clean_mrz_line(code[1]))
-            
-            line1 = strict_mrz_filter(line1)
-            line2 = strict_mrz_filter(line2)
+            line1 = clean_mrz_line(code[0])
+            line2 = clean_mrz_line(code[1])
 
             # Correct sex at index 20 of line 2 if available from mrz object
             # MRZ object might have parsed it correctly even if EasyOCR missed it
