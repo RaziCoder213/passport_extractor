@@ -127,7 +127,7 @@ class PassportExtractor:
     # ---------------------------------------------------
     # MAIN DATA FUNCTION
     # ---------------------------------------------------
-    def get_data(self, img_path):
+    def get_data(self, img_path, airline="flydubai"):
 
         if not os.path.exists(img_path):
             logger.error(f"File not found: {img_path}")
@@ -164,8 +164,8 @@ class PassportExtractor:
             "nationality": get_country_name(getattr(mrz, "nationality", "")),
             "passport_number": clean_string(getattr(mrz, "number", "")),
             "sex": get_sex(getattr(mrz, "sex", "")),
-            "date_of_birth": parse_date(getattr(mrz, "date_of_birth", "")),
-            "expiration_date": parse_date(getattr(mrz, "expiration_date", "")),
+            "date_of_birth": parse_date(getattr(mrz, "date_of_birth", ""), airline=airline),
+            "expiration_date": parse_date(getattr(mrz, "expiration_date", ""), airline=airline),
             "mrz_full_string": (line1 or "") + (line2 or ""),
             "valid_score": getattr(mrz, "valid_score", 0),
         }
