@@ -67,6 +67,7 @@ def main():
             
             for i, file in enumerate(uploaded_files):
                 st.write(f"Processing file {i+1} of {len(uploaded_files)}: {file.name}")
+                st.write(f"File type detected: {file.type}")  # Debug line
                 
                 with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.name)[1]) as tmp:
                     tmp.write(file.getvalue())
@@ -74,10 +75,12 @@ def main():
                 
                 try:
                     if file.type == "application/pdf":
+                        st.write(f"Processing as PDF: {file.name}")  # Debug line
                         results = extractor.process_pdf(tmp_path)
                         if not results:
                             st.warning(f"⚠️ No passport data found in PDF: {file.name}")
                     else:
+                        st.write(f"Processing as image: {file.name}")  # Debug line
                         result = extractor.get_data(tmp_path)
                         results = [result] if result else []
                         if not results:
