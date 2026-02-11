@@ -24,7 +24,9 @@ from src.utils import (
     get_country_name, 
     get_sex, 
     setup_logger,
-    clean_name_field
+    clean_name_field,
+    correct_mrz_common_errors,
+    strict_mrz_filter
 )
 from src.fallback_mrz import FallbackMRZ
 from config.settings import USE_GPU, OCR_LANGUAGES, TEMP_DIR
@@ -141,6 +143,10 @@ class PassportExtractor:
             # Get ROI (Region of Interest)
             roi = mrz.aux['roi']
             
+            # Manually crop bottom 30% if PassportEye ROI includes extra space above MRZ
+            h, w = roi.shape[:2]
+            roi = roi[int(h * 0.6):h, :]
+
             # Ensure ROI is uint8 for OpenCV
             if roi.dtype != np.uint8:
                 if roi.max() <= 1.0:
@@ -148,37 +154,34 @@ class PassportExtractor:
                 else:
                     roi = roi.astype(np.uint8)
 
-            # Preprocess ROI for EasyOCR
-            # Convert to grayscale if needed
+            # Convert to grayscale
             if len(roi.shape) == 3:
                 gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
             else:
                 gray = roi
 
-            # Resize while preserving aspect ratio
-            h, w = gray.shape
+            # Strong bilateral filter (better than Gaussian for text)
+            denoised = cv2.bilateralFilter(gray, 9, 75, 75)
+
+            # Blackhat morphology to enhance dark text
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 5))
+            blackhat = cv2.morphologyEx(denoised, cv2.MORPH_BLACKHAT, kernel)
+
+            # Normalize contrast
+            norm = cv2.normalize(blackhat, None, 0, 255, cv2.NORM_MINMAX)
+
+            # Otsu threshold (better for MRZ than adaptive)
+            _, thresh = cv2.threshold(norm, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+            # Remove small dots (opening)
+            small_kernel = np.ones((2,2), np.uint8)
+            cleaned = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, small_kernel)
+
+            # Resize preserving ratio
+            h, w = cleaned.shape
             scale = 140 / h
             new_w = int(w * scale)
-            resized = cv2.resize(gray, (new_w, 140))
-
-            # Gaussian blur (removes dot noise)
-            blur = cv2.GaussianBlur(resized, (3, 3), 0)
-
-            # Adaptive threshold (VERY IMPORTANT)
-            thresh = cv2.adaptiveThreshold(
-                blur,
-                255,
-                cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                cv2.THRESH_BINARY,
-                31,
-                2
-            )
-
-            # Morphological close to fix broken characters
-            kernel = np.ones((2,2), np.uint8)
-            processed = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
-
-            img_resized = processed
+            img_resized = cv2.resize(cleaned, (new_w, 140))
             
             # Define allowed characters for MRZ
             allow = st.ascii_uppercase + st.digits + "<"
@@ -202,6 +205,9 @@ class PassportExtractor:
 
             line1 = correct_mrz_common_errors(line1)
             line2 = correct_mrz_common_errors(line2)
+            
+            line1 = strict_mrz_filter(line1)
+            line2 = strict_mrz_filter(line2)
 
             # Correct sex at index 20 of line 2 if available from mrz object
             # MRZ object might have parsed it correctly even if EasyOCR missed it
