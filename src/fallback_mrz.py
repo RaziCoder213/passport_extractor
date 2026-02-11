@@ -38,13 +38,18 @@ class FallbackMRZ:
                     full_name = self.line1[5:].strip('<')
                     print(f"Full name extracted: '{full_name}'")
                     
+                    # Split by << and clean each part
                     if '<<' in full_name:
                         parts = full_name.split('<<', 1)
-                        self.surname = parts[0].strip()
-                        self.names = parts[1].strip()
+                        self.surname = parts[0].strip('<').strip()
+                        # Clean the names part - remove extra < characters
+                        names_part = parts[1].strip('<').strip() if len(parts) > 1 else ""
+                        # Remove any remaining < characters from names
+                        self.names = names_part.replace('<', '').strip()
                         print(f"Surname: '{self.surname}', Names: '{self.names}'")
                     else:
-                        self.surname = full_name.strip()
+                        self.surname = full_name.strip('<').strip()
+                        self.names = ""
                         print(f"Single name: '{self.surname}'")
             
             # Parse line 2 for other information (be more flexible with length)
