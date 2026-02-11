@@ -43,13 +43,18 @@ class PassportExtractor:
 
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         model_dir = os.path.join(base_dir, "data", "models")
+        user_network_dir = os.path.join(base_dir, "data", "easyocr_user_network")
+        
         os.makedirs(model_dir, exist_ok=True)
+        os.makedirs(user_network_dir, exist_ok=True)
 
         logger.info(f"Initializing EasyOCR Reader (GPU={use_gpu})...")
         self.reader = easyocr.Reader(
             self.languages,
             gpu=use_gpu,
-            model_storage_directory=model_dir
+            model_storage_directory=model_dir,
+            user_network_directory=user_network_dir
+            
         )
         logger.info("EasyOCR initialized.")
 
