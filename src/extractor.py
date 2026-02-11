@@ -1,107 +1,310 @@
-# passport_extractor.py
 import os
 import cv2
 import numpy as np
 import easyocr
+import warnings
+import ssl
 from passporteye import read_mrz
 from pdf2image import convert_from_path
 from PIL import Image
-from utils import (
-    setup_logger,
-    clean_name_field,
-    clean_mrz_line,
-    parse_date,
-    parse_mrz_names
-)
 import string as st
 
-TEMP_DIR = "temp_passport_images"
+# Fix for SSL certificate errors on Mac when downloading EasyOCR models
+try:
+    _create_unverified_https_context = ssl._create_unverified_context
+except AttributeError:
+    pass
+else:
+    ssl._create_default_https_context = _create_unverified_https_context
+
+from src.utils import (
+    clean_string, 
+    clean_mrz_line, 
+    parse_date, 
+    get_country_name, 
+    get_sex, 
+    setup_logger,
+    clean_name_field
+)
+from src.fallback_mrz import FallbackMRZ
+from config.settings import USE_GPU, OCR_LANGUAGES, TEMP_DIR
+
+# Suppress warnings
+warnings.filterwarnings('ignore')
 
 logger = setup_logger(__name__)
 
 class PassportExtractor:
-    def __init__(self, use_gpu=False, languages=['en']):
-        self.languages = languages
-        self.reader = easyocr.Reader(self.languages, gpu=use_gpu)
+    def __init__(self, use_gpu=USE_GPU, languages=None):
+        self.languages = languages if languages else OCR_LANGUAGES
+        
+        # Set model storage directory to project/data/models to avoid permission issues
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        model_dir = os.path.join(base_dir, 'data', 'models')
+        os.makedirs(model_dir, exist_ok=True)
+        
+        logger.info(f"Initializing EasyOCR Reader (GPU={use_gpu})...")
+        self.reader = easyocr.Reader(self.languages, gpu=use_gpu, model_storage_directory=model_dir)
+        logger.info("EasyOCR Reader initialized.")
 
-    def extract_mrz(self, img_path):
-        """Extract MRZ lines using PassportEye, fallback to EasyOCR"""
-        mrz = read_mrz(img_path)
-        if mrz:
-            line1 = clean_mrz_line(mrz.lines[0])
-            line2 = clean_mrz_line(mrz.lines[1])
+    def _retry_with_rotation(self, img_path):
+        """Try rotating image 90, 180, 270 degrees to find MRZ."""
+        try:
+            original = Image.open(img_path)
+            
+            for angle in [90, 180, 270]:
+                logger.info(f"Retrying with rotation: {angle} degrees")
+                # expand=True ensures the whole image is kept
+                rotated = original.rotate(angle, expand=True)
+                
+                # Save to a temp file
+                temp_rot_path = img_path + f"_rot_{angle}.png"
+                rotated.save(temp_rot_path)
+                
+                mrz = read_mrz(temp_rot_path, save_roi=True)
+                
+                # Cleanup
+                if os.path.exists(temp_rot_path):
+                    os.remove(temp_rot_path)
+                
+                if mrz:
+                    logger.info(f"MRZ detected after rotation {angle}")
+                    return mrz
+                    
+            return None
+        except Exception as e:
+            logger.error(f"Rotation fallback failed: {e}")
+            return None
+
+    def _fallback_direct_easyocr(self, img_path):
+        """
+        Fallback method: Read the entire image with EasyOCR and try to find MRZ lines.
+        """
+        try:
+            # Read full image
+            # detail=0 returns just the list of strings
+            result = self.reader.readtext(img_path, detail=0)
+            
+            # Filter and clean lines
+            potential_lines = []
+            for line in result:
+                clean = clean_mrz_line(line)
+                # Heuristic: MRZ lines are usually long (30-44 chars) and contain '<<' or start with P<, I<
+                if len(clean) > 30 and ('<<' in clean or clean.startswith(('P<', 'I<', 'A<', 'V<'))):
+                    potential_lines.append(clean)
+            
+            # Look for the last two valid lines (TD3 format usually has 2 lines at the bottom)
+            if len(potential_lines) >= 2:
+                # Assume the last two are the MRZ
+                line1 = potential_lines[-2]
+                line2 = potential_lines[-1]
+                
+                # Basic validation: Line 1 usually starts with P, I, A, V
+                if not line1[0] in 'PIAV':
+                     # Maybe we picked wrong lines. Let's look for a line starting with P/I/A/V
+                     for i, l in enumerate(potential_lines):
+                         if l.startswith(('P<', 'I<', 'A<', 'V<')) and i+1 < len(potential_lines):
+                             line1 = l
+                             line2 = potential_lines[i+1]
+                             break
+                
+                logger.info(f"Direct EasyOCR found potential MRZ: {line1} / {line2}")
+                mrz_obj = FallbackMRZ(line1, line2)
+                return line1, line2, mrz_obj
+            
+            return None, None, None
+
+        except Exception as e:
+            logger.error(f"Direct EasyOCR fallback failed: {e}")
+            return None, None, None
+
+    def extract_mrz_from_roi(self, img_path):
+        """
+        Extracts MRZ lines using PassportEye to find ROI, then EasyOCR to read text.
+        Returns (line1, line2, mrz_object).
+        """
+        try:
+            # Analyze image with PassportEye
+            mrz = read_mrz(img_path, save_roi=True)
+            
+            if not mrz:
+                logger.warning(f"PassportEye failed to detect MRZ in {img_path}. Trying rotations...")
+                # Try rotating 90, 180, 270
+                mrz = self._retry_with_rotation(img_path)
+            
+            if not mrz:
+                logger.warning(f"PassportEye failed to detect MRZ in {img_path} after rotations.")
+                # Fallback 2: Direct EasyOCR on the full image
+                logger.info("Attempting Direct EasyOCR fallback on full image...")
+                return self._fallback_direct_easyocr(img_path)
+
+            # Get ROI (Region of Interest)
+            roi = mrz.aux['roi']
+            
+            # Manually crop bottom 30% if PassportEye ROI includes extra space above MRZ
+            h, w = roi.shape[:2]
+            roi = roi[int(h * 0.6):h, :]
+
+            # Ensure ROI is uint8 for OpenCV
+            if roi.dtype != np.uint8:
+                if roi.max() <= 1.0:
+                    roi = (roi * 255).astype(np.uint8)
+                else:
+                    roi = roi.astype(np.uint8)
+
+            # Convert to grayscale
+            if len(roi.shape) == 3:
+                gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+            else:
+                gray = roi
+
+            # Enhance contrast
+            alpha = 1.5  # Contrast control
+            beta = 10    # Brightness control
+            adjusted = cv2.convertScaleAbs(gray, alpha=alpha, beta=beta)
+
+            # Apply mild Gaussian blur to reduce noise
+            blurred = cv2.GaussianBlur(adjusted, (3,3), 0)
+
+            # Use adaptive threshold for better text extraction
+            binary = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                                          cv2.THRESH_BINARY, 11, 2)
+
+            # Clean up small noise
+            kernel = np.ones((2,2), np.uint8)
+            cleaned = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
+
+            # Resize preserving ratio
+            h, w = cleaned.shape
+            scale = 140 / h
+            new_w = int(w * scale)
+            img_resized = cv2.resize(cleaned, (new_w, 140))
+            
+            # Define allowed characters for MRZ
+            allow = st.ascii_uppercase + st.digits + "<"
+            
+            # Run EasyOCR with stricter parameters
+            code = self.reader.readtext(
+                img_resized,
+                detail=0,
+                allowlist=allow,
+                paragraph=False,
+                width_ths=0.5,
+                height_ths=0.5
+            )
+
+            if len(code) < 2:
+                logger.warning(f"EasyOCR found fewer than 2 lines in ROI for {img_path}")
+                return None, None, mrz
+
+            line1 = clean_mrz_line(code[0])
+            line2 = clean_mrz_line(code[1])
+
+            # Correct sex at index 20 of line 2 if available from mrz object
+            # MRZ object might have parsed it correctly even if EasyOCR missed it
+            if mrz.sex and len(line2) > 20:
+                l2_list = list(line2)
+                l2_list[20] = mrz.sex
+                line2 = "".join(l2_list)
+
             return line1, line2, mrz
-        # Fallback with EasyOCR
-        logger.info("PassportEye failed, using EasyOCR fallback...")
-        allow_chars = st.ascii_uppercase + st.digits + "<"
-        result = self.reader.readtext(img_path, detail=0, allowlist=allow_chars)
-        potential_lines = [clean_mrz_line(r) for r in result if '<<' in r and len(r) >= 30]
-        if len(potential_lines) >= 2:
-            return potential_lines[-2], potential_lines[-1], None
-        return None, None, None
 
-    def get_passport_data(self, img_path):
+        except Exception as e:
+            logger.error(f"Error in extract_mrz_from_roi: {e}")
+            return None, None, None
+
+    def get_data(self, img_path, airline=None):
+        """
+        Extracts full passport data from an image file.
+        Returns a dictionary of extracted fields.
+        """
         if not os.path.exists(img_path):
             logger.error(f"File not found: {img_path}")
             return None
-        line1, line2, mrz_obj = self.extract_mrz(img_path)
-        if not line1 or not line2:
-            logger.warning(f"MRZ extraction failed for {img_path}")
+
+        line1, line2, mrz = self.extract_mrz_from_roi(img_path)
+
+        # If we have clean lines from EasyOCR, use them to create a new MRZ object
+        # to ensure data consistency, overriding any potentially faulty data from passporteye
+        if line1 and line2:
+            mrz = FallbackMRZ(line1, line2)
+
+        if mrz is None:
+            logger.warning(f"Could not extract a valid MRZ from {img_path}")
             return None
-
-        # Parse names from line1 only
-        surname, given_names = parse_mrz_names(line1)
-        surname = clean_name_field(surname)
-        given_names = clean_name_field(given_names)
-
-        # MRZ object data fallback if available
-        passport_number = mrz_obj.number if mrz_obj else ""
-        nationality = mrz_obj.nationality if mrz_obj else ""
-        country = mrz_obj.country if mrz_obj else ""
-        sex = mrz_obj.sex if mrz_obj else ""
-        dob = parse_date(mrz_obj.date_of_birth) if mrz_obj else ""
-        expiry = parse_date(mrz_obj.expiration_date) if mrz_obj else ""
+        
+        # Safely get data from MRZ object
+        # FallbackMRZ has 'names', passporteye has 'name'. Let's check for both.
+        surname = clean_name_field(getattr(mrz, 'surname', ''))
+        name = clean_name_field(getattr(mrz, 'names', getattr(mrz, 'name', '')))
 
         data = {
             "surname": surname,
-            "given_names": given_names,
-            "passport_number": passport_number,
-            "nationality": nationality,
-            "country": country,
-            "sex": sex,
-            "date_of_birth": dob,
-            "expiration_date": expiry,
-            "mrz_line1": line1,
-            "mrz_line2": line2
+            "name": name,
+            "country": get_country_name(getattr(mrz, 'country', '')),
+            "nationality": get_country_name(getattr(mrz, 'nationality', '')),
+            "passport_number": clean_string(getattr(mrz, 'number', '')),
+            "sex": get_sex(getattr(mrz, 'sex', '')),
+            "date_of_birth": parse_date(getattr(mrz, 'date_of_birth', '')),
+            "expiration_date": parse_date(getattr(mrz, 'expiration_date', '')),
+            "mrz_full_string": (line1 or "") + (line2 or ""),
+            "valid_score": getattr(mrz, 'valid_score', 0),
         }
         return data
 
-    def process_pdf(self, pdf_path):
-        """Extract passport data from each page of a PDF"""
-        if not os.path.exists(pdf_path):
-            logger.error(f"PDF not found: {pdf_path}")
-            return []
 
+
+    def process_pdf(self, pdf_path):
+        """
+        Converts PDF pages to images and extracts data from each.
+        Returns a list of data dictionaries.
+        """
+        extracted_data = []
+        
+        # Ensure temp dir exists
         os.makedirs(TEMP_DIR, exist_ok=True)
+        
+        logger.info(f"Processing PDF: {pdf_path}")
         try:
             pages = convert_from_path(pdf_path)
         except Exception as e:
-            logger.error(f"PDF conversion failed: {e}")
-            return []
+            try:
+                import fitz
+                doc = fitz.open(pdf_path)
+                pages = []
+                for i in range(len(doc)):
+                    page = doc.load_page(i)
+                    pix = page.get_pixmap(dpi=200)
+                    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                    pages.append(img)
+                doc.close()
+            except Exception as e2:
+                logger.error(f"Failed to convert PDF {pdf_path}: {e2}")
+                return []
 
-        results = []
         for i, page in enumerate(pages):
-            temp_img_path = os.path.join(TEMP_DIR, f"page_{i+1}.png")
+            temp_img_path = os.path.join(TEMP_DIR, f"temp_page_{i+1}.png")
             page.save(temp_img_path, "PNG")
-            data = self.get_passport_data(temp_img_path)
-            if data:
-                results.append(data)
-            os.remove(temp_img_path)
-        return results
+            
+            logger.info(f"Processing page {i+1}...")
+            result = self.get_data(temp_img_path)
+            
+            # Special MRZ fix for PDF from original code
+            # It seems to re-clean the combined string.
+            if result and result.get("mrz_full_string"):
+                full_mrz = result["mrz_full_string"]
+                if len(full_mrz) >= 88: # 44 * 2
+                    l1 = full_mrz[:44]
+                    l2 = full_mrz[44:]
+                    l1 = clean_mrz_line(l1)
+                    l2 = clean_mrz_line(l2)
+                    result["mrz_full_string"] = l1 + l2
+            
+            if result:
+                extracted_data.append(result)
+            
+            # Cleanup temp file
+            if os.path.exists(temp_img_path):
+                os.remove(temp_img_path)
 
-# Example usage
-if __name__ == "__main__":
-    extractor = PassportExtractor(use_gpu=False)
-    image_path = "passport.jpg"  # Replace with your image
-    data = extractor.get_passport_data(image_path)
-    print(data)
+        return extracted_data
