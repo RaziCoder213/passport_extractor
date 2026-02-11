@@ -278,13 +278,17 @@ class PassportExtractor:
                 given_name = re.sub(r'\s+(SURNAME|FAMILY NAME|LAST NAME|FIRST NAME|DATE|PLACE|NATIONALITY|SEX|PASSPORT)$', '', given_name, flags=re.IGNORECASE)
                 
                 # Handle OCR artifacts - remove trailing single letters
-                # Case 1: Single uppercase letter at the end (like "SYEDIBRAHEEMK")
-                if len(given_name) > 1 and given_name[-1].isupper() and not given_name[-2].isspace():
-                    # Only remove if the last character is a single uppercase letter not preceded by space
-                    given_name = given_name[:-1]
+                # Case 1: Single uppercase letter at the end attached to name (like "SYEDIBRAHEEMK")
+                # Only remove if it's a single letter and not part of a valid name ending
+                if len(given_name) > 3 and given_name[-1].isupper() and not given_name[-2].isspace():
+                    # Check if removing it would leave a valid name (at least 2 characters)
+                    if len(given_name[:-1]) >= 2:
+                        given_name = given_name[:-1]
                 # Case 2: Single uppercase letter separated by space (like "SYED IBRAHEEM K")
                 elif len(given_name) > 2 and given_name[-1].isupper() and given_name[-2] == ' ':
-                    given_name = given_name[:-2].rstrip()
+                    # Check if removing it would leave a valid name
+                    if len(given_name[:-2].rstrip()) >= 2:
+                        given_name = given_name[:-2].rstrip()
                 
                 # If the name is too long or contains unusual characters, it might be a false positive
                 if len(given_name) > 50 or any(char.isdigit() for char in given_name):
