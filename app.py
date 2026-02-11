@@ -11,6 +11,56 @@ import time
 from src.extractor import PassportExtractor
 from src.validators import validate_passport_data
 from src.formats import format_iraqi_airways, format_flydubai
+from src.utils import parse_date
+
+
+def process_pdf_file(uploaded_file, use_gpu=False, airline="flydubai"):
+    """
+    Process a single uploaded PDF file and extract passport data.
+
+    Args:
+        uploaded_file: Uploaded file object (Streamlit or similar)
+        use_gpu (bool): Whether to use GPU acceleration
+        airline (str): Airline format for date formatting ("flydubai", "default", "iraqi airways")
+
+    Returns:
+        List[dict]: Extracted passport data for each page/passport
+    """
+    extractor = PassportExtractor(use_gpu=use_gpu)
+    results = []
+    tmp_path = None
+
+    try:
+        # Save uploaded file to temporary location
+        suffix = os.path.splitext(uploaded_file.name)[1]
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(uploaded_file.getvalue())
+            tmp_path = tmp.name
+
+        # Extract passport data from PDF with airline-specific formatting
+        results = extractor.process_pdf(tmp_path, airline=airline.lower(), progress_callback=None)
+        if not results:
+            print(f"⚠️ No passport data found in PDF: {uploaded_file.name}")
+
+        # Attach source file name to each result
+        for res in results:
+            res['source_file'] = uploaded_file.name
+
+    except Exception as e:
+        print(f"❌ Error processing {uploaded_file.name}: {str(e)}")
+        import traceback
+        print(f"Debug info: {traceback.format_exc()}")
+        results = []
+
+    finally:
+        # Clean up temp file
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception as cleanup_error:
+                print(f"Warning: Could not clean up temp file: {cleanup_error}")
+
+    return results
 
 # Set page configuration
 st.set_page_config(
@@ -47,7 +97,8 @@ def main():
 
     # Sidebar Configuration
     st.sidebar.header("Settings")
-    use_gpu = st.sidebar.checkbox("Enable GPU Acceleration", value=False)
+    st.sidebar.info("💡 Running on Streamlit free tier - CPU only, max 10 MB per file")
+    use_gpu = st.sidebar.checkbox("Enable GPU Acceleration", value=False, disabled=True)  # Disabled for free tier
     airline = st.sidebar.selectbox("Choose Airline Format", ["Default", "Iraqi Airways", "Flydubai"])
 
     # File Uploader
@@ -63,22 +114,41 @@ def main():
             extractor = PassportExtractor(use_gpu=use_gpu)
             
             all_results = []
-            progress_bar = st.progress(0)
+            main_progress_bar = st.progress(0)
             
             for i, file in enumerate(uploaded_files):
                 st.write(f"Processing file {i+1} of {len(uploaded_files)}: {file.name}")
+                
+                # Check file size for Streamlit free tier
+                file_size = len(file.getvalue())
+                if file_size > 10 * 1024 * 1024:  # 10 MB
+                    st.error(f"❌ File too large: {file.name} ({file_size / (1024*1024):.1f} MB). Max 10 MB allowed.")
+                    main_progress_bar.progress((i + 1) / len(uploaded_files))
+                    continue
                 
                 with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.name)[1]) as tmp:
                     tmp.write(file.getvalue())
                     tmp_path = tmp.name
                 
                 try:
-                    if file.type == "application/pdf":
-                        results = extractor.process_pdf(tmp_path)
-                        if not results:
-                            st.warning(f"⚠️ No passport data found in PDF: {file.name}")
+                    # Check both MIME type and file extension for PDF detection
+                    is_pdf = file.type == "application/pdf" or file.name.lower().endswith('.pdf')
+                    
+                    if is_pdf:
+                        st.write(f"📄 Processing as PDF: {file.name} (type: {file.type})")
+                        
+                        try:
+                            # Use the new standalone PDF processing function
+                            results = process_pdf_file(file, use_gpu=use_gpu, airline=airline.lower())
+                            if not results:
+                                st.warning(f"⚠️ No passport data found in PDF: {file.name}")
+                        except Exception as e:
+                            st.error(f"❌ PDF processing failed for {file.name}: {str(e)}")
+                            results = []
+                            
                     else:
-                        result = extractor.get_data(tmp_path)
+                        st.write(f"🖼️ Processing as image: {file.name} (type: {file.type})")
+                        result = extractor.get_data(tmp_path, airline=airline.lower())
                         results = [result] if result else []
                         if not results:
                             st.warning(f"⚠️ No passport data found in image: {file.name}")
@@ -89,11 +159,19 @@ def main():
                     
                 except Exception as e:
                     st.error(f"❌ Error processing {file.name}: {str(e)}")
+                    import traceback
+                    st.error(f"Debug info: {traceback.format_exc()}")
                     
                 finally:
-                    os.remove(tmp_path)
+                    # Safely remove temp file
+                    try:
+                        if os.path.exists(tmp_path):
+                            os.remove(tmp_path)
+                    except Exception as cleanup_error:
+                        st.warning(f"Warning: Could not clean up temp file: {cleanup_error}")
                 
-                progress_bar.progress((i + 1) / len(uploaded_files))
+                # Update main progress bar
+                main_progress_bar.progress((i + 1) / len(uploaded_files))
 
             if not all_results:
                 st.warning("No data could be extracted. Please check the files or try again.")
