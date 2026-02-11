@@ -177,6 +177,9 @@ class PassportExtractor:
     def process_pdf(self, pdf_path):
         """Process a PDF file and extract passport data from all pages."""
         try:
+            # Ensure temp directory exists
+            os.makedirs(TEMP_DIR, exist_ok=True)
+            
             # Convert PDF to images
             images = convert_from_path(pdf_path)
             results = []
