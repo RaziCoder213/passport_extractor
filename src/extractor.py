@@ -211,26 +211,12 @@ class PassportExtractor:
         data['expiration_date'] = parse_date(mrz.expiration_date)
         data['personal_number'] = clean_string(mrz.personal_number)
         
-        # Heuristic: remove an accidental single-letter appended to the last word
-        # Example: 'SYED IBRAHIMK' -> 'SYED IBRAHIM'
-        # We only strip a single trailing letter from the last word when it's likely an OCR artifact.
-        def _strip_trailing_single_letter(s: str) -> str:
-            if not s:
-                return s
-            parts = s.split()
-            if not parts:
-                return s
-            last = parts[-1]
-            # If last word ends with a single extra letter (A-Z) and the remainder is at least 2 chars,
-            # consider it an artifact and remove the trailing letter.
-            if len(last) >= 2 and last[-1].isalpha() and len(last[:-1]) >= 2:
-                # Avoid removing if last two characters are both letters and likely an initial e.g. 'A.' cases
-                parts[-1] = last[:-1]
-                return " ".join(parts).strip()
-            return s
-
+        # Fix: remove accidental trailing 'K' from names/surname caused by OCR/parse noise
+        # If the field ends with a single 'K' character (no separating space) it's likely an artifact.
         for key in ('name', 'surname'):
-            data[key] = _strip_trailing_single_letter(data.get(key, ""))
+            val = data.get(key, "")
+            if val and val.endswith('K') and not val.endswith(' K') and len(val) > 2:
+                data[key] = val[:-1].strip()
         # Construct full MRZ string
         # Prefer the OCR'd lines if they exist, otherwise fallback?
         # The original code returned (line1 or "") + (line2 or "")
