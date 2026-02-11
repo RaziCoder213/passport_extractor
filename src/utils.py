@@ -108,3 +108,40 @@ def get_sex(code):
     if code == '0':
         return 'M' # Fallback based on existing logic
     return code
+
+def parse_barcode_data(barcode_data):
+    """
+    Parse PDF417 barcode data from passport.
+    Handles various formats from different countries.
+    """
+    try:
+        lines = barcode_data.split('\n')
+        if len(lines) < 2:
+            return None
+        
+        # Extract names from first line
+        name_line = lines[0].replace('@','').replace('<',' ').strip()
+        surname, given_names = name_line.split(' ', 1) if ' ' in name_line else (name_line, '')
+        
+        # Parse remaining fields (simplified format)
+        if len(lines[1]) >= 25:
+            passport_number = lines[1][:9].strip()
+            nationality = lines[1][9:12].strip()
+            dob = parse_date(lines[1][12:18])
+            sex = lines[1][18]
+            expiry = parse_date(lines[1][19:25])
+            
+            return {
+                "surname": clean_name_field(surname),
+                "given_names": clean_name_field(given_names),
+                "passport_number": passport_number,
+                "nationality": nationality,
+                "sex": sex,
+                "date_of_birth": dob,
+                "expiration_date": expiry,
+                "barcode_data": barcode_data
+            }
+        return None
+    except Exception as e:
+        logger.error(f"Error parsing barcode data: {e}")
+        return None
