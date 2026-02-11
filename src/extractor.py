@@ -186,14 +186,56 @@ class PassportExtractor:
             logger.error(f"Error in extract_mrz_from_roi: {e}")
             return None, None, None
 
+    def preprocess_for_ocr(self, img):
+        """
+        Preprocess image for better OCR accuracy
+        """
+        try:
+            # Convert to grayscale
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            
+            # Apply Gaussian blur to reduce noise
+            blur = cv2.GaussianBlur(gray, (5, 5), 0)
+            
+            # Apply adaptive thresholding for better text contrast
+            thresh = cv2.adaptiveThreshold(
+                blur, 255,
+                cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                cv2.THRESH_BINARY, 11, 2
+            )
+            
+            # Apply morphological operations to clean up
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+            clean = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+            
+            return clean
+        except Exception as e:
+            logger.warning(f"Image preprocessing failed, using original: {e}")
+            return img
+
     def extract_given_name_from_visual_zone(self, img_path):
         """
         Extracts the given name from the visual inspection zone of the passport
         (not from MRZ). Looks for 'Given Name' or 'Given Names' field.
         """
         try:
-            # Read the entire image with EasyOCR
-            results = self.reader.readtext(img_path)
+            # Preprocess image for better OCR accuracy
+            original_img = cv2.imread(img_path)
+            if original_img is not None:
+                processed_img = self.preprocess_for_ocr(original_img)
+                # Save processed image temporarily for OCR
+                temp_processed_path = img_path.replace('.jpg', '_processed.jpg').replace('.png', '_processed.png')
+                cv2.imwrite(temp_processed_path, processed_img)
+                
+                # Read the processed image with EasyOCR
+                results = self.reader.readtext(temp_processed_path)
+                
+                # Cleanup temp file
+                if os.path.exists(temp_processed_path):
+                    os.remove(temp_processed_path)
+            else:
+                # Fallback to original if preprocessing fails
+                results = self.reader.readtext(img_path)
             
             # Convert results to text lines for easier processing
             text_lines = []
