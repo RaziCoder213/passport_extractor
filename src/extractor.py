@@ -24,10 +24,7 @@ from src.utils import (
     get_country_name, 
     get_sex, 
     setup_logger,
-    clean_name_field,
-    correct_mrz_line1,
-    correct_mrz_line2,
-    strict_mrz_filter
+    clean_name_field
 )
 from src.fallback_mrz import FallbackMRZ
 from config.settings import USE_GPU, OCR_LANGUAGES, TEMP_DIR
@@ -144,10 +141,6 @@ class PassportExtractor:
             # Get ROI (Region of Interest)
             roi = mrz.aux['roi']
             
-            # Manually crop bottom 30% if PassportEye ROI includes extra space above MRZ
-            h, w = roi.shape[:2]
-            roi = roi[int(h * 0.6):h, :]
-
             # Ensure ROI is uint8 for OpenCV
             if roi.dtype != np.uint8:
                 if roi.max() <= 1.0:
@@ -155,57 +148,41 @@ class PassportExtractor:
                 else:
                     roi = roi.astype(np.uint8)
 
-            # Convert to grayscale
-            if len(roi.shape) == 3:
-                gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-            else:
-                gray = roi
+            # Preprocess ROI for EasyOCR
+            # Convert to grayscale if not already
+            if len(roi.shape) == 3: # If it's a color image
+                roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
 
-            # Strong bilateral filter (better than Gaussian for text)
-            denoised = cv2.bilateralFilter(gray, 9, 75, 75)
+            # Increase contrast
+            roi = cv2.equalizeHist(roi)
 
-            # Blackhat morphology to enhance dark text
-            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 5))
-            blackhat = cv2.morphologyEx(denoised, cv2.MORPH_BLACKHAT, kernel)
+            # Remove noise
+            roi = cv2.GaussianBlur(roi, (5,5), 0)
 
-            # Normalize contrast
-            norm = cv2.normalize(blackhat, None, 0, 255, cv2.NORM_MINMAX)
-
-            # Otsu threshold (better for MRZ than adaptive)
-            _, thresh = cv2.threshold(norm, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-            # Remove small dots (opening)
-            small_kernel = np.ones((2,2), np.uint8)
-            cleaned = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, small_kernel)
-
-            # Resize preserving ratio
-            h, w = cleaned.shape
-            scale = 140 / h
-            new_w = int(w * scale)
-            img_resized = cv2.resize(cleaned, (new_w, 140))
+            # Threshold
+            roi = cv2.adaptiveThreshold(
+                roi, 255,
+                cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                cv2.THRESH_BINARY,
+                11, 2
+            )
+            
+            # Resize to improve OCR accuracy as per original code logic
+            # Note: (1110, 140) is the target size (Width, Height)
+            img_resized = cv2.resize(roi, (1110, 140))
             
             # Define allowed characters for MRZ
             allow = st.ascii_uppercase + st.digits + "<"
             
-            # Run EasyOCR with stricter parameters
-            code = self.reader.readtext(
-                img_resized,
-                detail=0,
-                allowlist=allow,
-                paragraph=False,
-                width_ths=0.5,
-                height_ths=0.5
-            )
+            # Run EasyOCR
+            code = self.reader.readtext(img_resized, detail=0, allowlist=allow)
 
             if len(code) < 2:
                 logger.warning(f"EasyOCR found fewer than 2 lines in ROI for {img_path}")
                 return None, None, mrz
 
-            line1 = correct_mrz_line1(clean_mrz_line(code[0]))
-            line2 = correct_mrz_line2(clean_mrz_line(code[1]))
-            
-            line1 = strict_mrz_filter(line1)
-            line2 = strict_mrz_filter(line2)
+            line1 = clean_mrz_line(code[0])
+            line2 = clean_mrz_line(code[1])
 
             # Correct sex at index 20 of line 2 if available from mrz object
             # MRZ object might have parsed it correctly even if EasyOCR missed it
@@ -259,7 +236,51 @@ class PassportExtractor:
         }
         return data
 
+    def process_pdf(self, pdf_path, airline=None):
+        """
+        Extracts passport data from all pages of a PDF file.
+        Returns a list of dictionaries, one for each page with a valid MRZ.
+        """
+        if not os.path.exists(TEMP_DIR):
+            os.makedirs(TEMP_DIR)
 
+        try:
+            images = convert_from_path(pdf_path, dpi=300)
+            results = []
+            for i, img in enumerate(images):
+                page_path = os.path.join(TEMP_DIR, f"page_{i}.png")
+                img.save(page_path, 'PNG')
+                
+                data = self.get_data(page_path, airline=airline)
+                if data:
+                    data['source_page'] = i + 1
+                    results.append(data)
+            
+            return results
+        except Exception as e:
+            logger.error(f"PDF processing failed for {pdf_path}: {e}")
+            return []
+
+        data = {}
+        # Use PassportEye's parsing where possible, fallback/clean as needed
+        data['surname'] = clean_name_field(mrz.surname)
+        data['name'] = clean_name_field(mrz.names)
+        data['sex'] = get_sex(mrz.sex)
+        data['date_of_birth'] = parse_date(mrz.date_of_birth) if mrz.date_of_birth else ""
+        data['nationality'] = get_country_name(mrz.nationality)
+        data['passport_type'] = clean_string(mrz.type)
+        data['passport_number'] = clean_string(mrz.number)
+        data['issuing_country'] = get_country_name(mrz.country)
+        data['expiration_date'] = parse_date(mrz.expiration_date)
+        data['personal_number'] = clean_string(mrz.personal_number)
+        
+        # Construct full MRZ string
+        # Prefer the OCR'd lines if they exist, otherwise fallback?
+        # The original code returned (line1 or "") + (line2 or "")
+        data['mrz_full_string'] = (line1 or "") + (line2 or "")
+        data['source_file'] = os.path.basename(img_path)
+
+        return data
 
     def process_pdf(self, pdf_path):
         """
