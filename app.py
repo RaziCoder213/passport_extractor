@@ -54,40 +54,66 @@ def main():
     if 'raw_results' not in st.session_state:
         st.session_state.raw_results = None
 
-    # File Uploader
+    # File Uploader with enhanced configuration
+    st.info("💡 You can upload up to 500 passport files at once. Supported formats: PNG, JPG, JPEG, PDF, AVIF, WEBP, BMP, TIFF")
+    
     uploaded_files = st.file_uploader(
-        "Upload Passport Files",
+        "Upload Passport Files (Max 500 files)",
         type=['png', 'jpg', 'jpeg', 'pdf', 'avif', 'webp', 'bmp', 'tiff'],
-        accept_multiple_files=True
+        accept_multiple_files=True,
+        key="passport_uploader"
     )
 
     if uploaded_files:
-        if st.button("Extract Data"):
-            # Initialize extractor inside the button click to use the latest settings
-            extractor = PassportExtractor(use_gpu=use_gpu)
+        file_count = len(uploaded_files)
+        if file_count > 500:
+            st.error(f"❌ You have uploaded {file_count} files. Maximum allowed is 500 files. Please select fewer files.")
+            st.stop()
+        
+        if file_count > 0:
+            st.success(f"📁 {file_count} file(s) uploaded successfully!")
             
-            all_results = []
-            progress_bar = st.progress(0)
-            
-            for i, file in enumerate(uploaded_files):
-                with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.name)[1]) as tmp:
-                    tmp.write(file.getvalue())
-                    tmp_path = tmp.name
+            if st.button("Extract Data", type="primary"):
+                # Initialize extractor inside the button click to use the latest settings
+                extractor = PassportExtractor(use_gpu=use_gpu)
                 
-                try:
-                    if file.type == "application/pdf":
-                        results = extractor.process_pdf(tmp_path)
-                    else:
-                        result = extractor.get_data(tmp_path)
-                        results = [result] if result else []
+                all_results = []
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                
+                # Process files in batches for better performance
+                batch_size = 10
+                
+                for i, file in enumerate(uploaded_files):
+                    # Update status
+                    status_text.text(f"Processing file {i+1} of {file_count}: {file.name}")
                     
-                    for res in results:
-                        res['source_file'] = file.name
-                    all_results.extend(results)
-                finally:
-                    os.remove(tmp_path)
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.name)[1]) as tmp:
+                        tmp.write(file.getvalue())
+                        tmp_path = tmp.name
+                    
+                    try:
+                        if file.type == "application/pdf":
+                            results = extractor.process_pdf(tmp_path)
+                        else:
+                            result = extractor.get_data(tmp_path)
+                            results = [result] if result else []
+                        
+                        for res in results:
+                            res['source_file'] = file.name
+                        all_results.extend(results)
+                        
+                    except Exception as e:
+                        st.warning(f"⚠️ Error processing {file.name}: {str(e)}")
+                        
+                    finally:
+                        os.remove(tmp_path)
+                    
+                    # Update progress
+                    progress_bar.progress((i + 1) / file_count)
                 
-                progress_bar.progress((i + 1) / len(uploaded_files))
+                # Clear status text
+                status_text.empty()
 
             if not all_results:
                 st.warning("No data could be extracted. Please check the files or try again.")
