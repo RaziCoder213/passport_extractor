@@ -4,6 +4,7 @@ import numpy as np
 import easyocr
 import warnings
 import ssl
+import re
 from passporteye import read_mrz
 from pdf2image import convert_from_path
 from PIL import Image
@@ -23,7 +24,8 @@ from src.utils import (
     parse_date, 
     get_country_name, 
     get_sex, 
-    setup_logger
+    setup_logger,
+    clean_name_field
 )
 from src.fallback_mrz import FallbackMRZ
 from config.settings import USE_GPU, OCR_LANGUAGES, TEMP_DIR
@@ -159,7 +161,7 @@ class PassportExtractor:
             img_resized = cv2.resize(roi, (1110, 140))
             
             # Define allowed characters for MRZ
-            allow = st.ascii_letters + st.digits + "< "
+            allow = st.ascii_uppercase + st.digits + "<"
             
             # Run EasyOCR
             code = self.reader.readtext(img_resized, detail=0, allowlist=allow)
@@ -184,7 +186,302 @@ class PassportExtractor:
             logger.error(f"Error in extract_mrz_from_roi: {e}")
             return None, None, None
 
-    def get_data(self, img_path):
+    def preprocess_for_ocr(self, img):
+        """
+        Preprocess image for better OCR accuracy
+        """
+        try:
+            # Convert to grayscale
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            
+            # Apply Gaussian blur to reduce noise
+            blur = cv2.GaussianBlur(gray, (5, 5), 0)
+            
+            # Apply adaptive thresholding for better text contrast
+            thresh = cv2.adaptiveThreshold(
+                blur, 255,
+                cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                cv2.THRESH_BINARY, 11, 2
+            )
+            
+            # Apply morphological operations to clean up
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+            clean = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+            
+            return clean
+        except Exception as e:
+            logger.warning(f"Image preprocessing failed, using original: {e}")
+            return img
+
+    def correct_common_ocr_errors(self, text):
+        """
+        Correct common OCR errors in passport text
+        """
+        if not text:
+            return text
+        
+        # Common OCR substitutions in passport context
+        corrections = {
+            '0': 'O',  # Zero to letter O
+            '1': 'I',  # One to letter I
+            '5': 'S',  # Five to letter S
+            '8': 'B',  # Eight to letter B
+            '2': 'Z',  # Two to letter Z (in some contexts)
+            '6': 'G',  # Six to letter G
+            '7': 'T',  # Seven to letter T
+        }
+        
+        # Apply corrections only for single characters that are clearly errors
+        corrected_text = ""
+        for char in text:
+            if char in corrections and len(text) > 1:
+                # Only correct if it makes sense in context (e.g., not in numbers)
+                if not text.isdigit():
+                    corrected_text += corrections[char]
+                else:
+                    corrected_text += char
+            else:
+                corrected_text += char
+        
+        return corrected_text
+    
+    def correct_name_patterns(self, name):
+        """
+        Apply pattern-based corrections for common name OCR errors
+        """
+        if not name:
+            return name
+        
+        # Common name pattern corrections
+        name = re.sub(r'\bAHMED\b', 'AHMED', name, flags=re.IGNORECASE)
+        name = re.sub(r'\bMOHAMMED\b', 'MOHAMMED', name, flags=re.IGNORECASE)
+        name = re.sub(r'\bMOHAMED\b', 'MOHAMED', name, flags=re.IGNORECASE)
+        name = re.sub(r'\bMUHAMMAD\b', 'MUHAMMAD', name, flags=re.IGNORECASE)
+        
+        # Remove multiple spaces
+        name = re.sub(r'\s+', ' ', name)
+        
+        # Ensure proper spacing around initials
+        name = re.sub(r'([A-Z])\.?([A-Z])', r'\1 \2', name)
+        
+        return name.strip()
+
+    def detect_text_regions(self, img):
+        """
+        Detect text regions in passport image using EAST text detector
+        """
+        try:
+            # Load EAST text detector model (you'll need to download frozen_east_text_detection.pb)
+            # For now, we'll use a simpler approach with contour detection
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            
+            # Apply morphological operations to enhance text regions
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 3))
+            morph = cv2.morphologyEx(gray, cv2.MORPH_TOPHAT, kernel)
+            
+            # Apply threshold
+            _, thresh = cv2.threshold(morph, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            
+            # Find contours
+            contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            regions = []
+            for contour in contours:
+                x, y, w, h = cv2.boundingRect(contour)
+                
+                # Filter by aspect ratio and size (text regions are typically wide and short)
+                if w > 50 and h > 10 and w/h > 2:
+                    regions.append((x, y, w, h))
+            
+            return regions
+        except Exception as e:
+            logger.warning(f"Text region detection failed: {e}")
+            return []
+    
+    def extract_name_region(self, img, regions):
+        """
+        Extract the name region from detected text regions
+        """
+        try:
+            # Sort regions by y-coordinate (top to bottom)
+            regions.sort(key=lambda r: r[1])
+            
+            # Look for regions that might contain name fields
+            name_regions = []
+            for i, (x, y, w, h) in enumerate(regions):
+                # Look for regions in the upper part of passport (where names typically are)
+                if y < img.shape[0] // 3:
+                    name_regions.append((x, y, w, h))
+            
+            if name_regions:
+                # Take the first few regions as potential name areas
+                x_min = min(r[0] for r in name_regions)
+                y_min = min(r[1] for r in name_regions)
+                x_max = max(r[0] + r[2] for r in name_regions)
+                y_max = max(r[1] + r[3] for r in name_regions)
+                
+                # Add some padding
+                padding = 20
+                x_min = max(0, x_min - padding)
+                y_min = max(0, y_min - padding)
+                x_max = min(img.shape[1], x_max + padding)
+                y_max = min(img.shape[0], y_max + padding)
+                
+                return img[y_min:y_max, x_min:x_max]
+            
+            return None
+        except Exception as e:
+            logger.warning(f"Name region extraction failed: {e}")
+            return None
+
+    def extract_given_name_from_visual_zone(self, img_path):
+        """
+        Extracts the given name from the visual inspection zone of the passport
+        (not from MRZ). Looks for 'Given Name' or 'Given Names' field.
+        """
+        try:
+            # Load the original image
+            original_img = cv2.imread(img_path)
+            if original_img is None:
+                logger.error(f"Failed to load image: {img_path}")
+                return None
+            
+            # Detect text regions in the image
+            text_regions = self.detect_text_regions(original_img)
+            
+            # Extract name-specific region for better OCR focus
+            name_region = self.extract_name_region(original_img, text_regions)
+            
+            # Preprocess image for better OCR accuracy
+            if name_region is not None:
+                # Use the name-specific region if detected
+                processed_img = self.preprocess_for_ocr(name_region)
+                logger.info("Using name-specific region for OCR")
+            else:
+                # Fallback to full image preprocessing
+                processed_img = self.preprocess_for_ocr(original_img)
+                logger.info("Using full image for OCR")
+            
+            # Save processed image temporarily for OCR
+            temp_processed_path = img_path.replace('.jpg', '_processed.jpg').replace('.png', '_processed.png')
+            cv2.imwrite(temp_processed_path, processed_img)
+            
+            # Read the processed image with EasyOCR
+            results = self.reader.readtext(temp_processed_path)
+            
+            # Cleanup temp file
+            if os.path.exists(temp_processed_path):
+                os.remove(temp_processed_path)
+            
+            # Convert results to text lines for easier processing
+            text_lines = []
+            for (bbox, text, confidence) in results:
+                if confidence > 0.5:  # Filter low confidence readings
+                    text_lines.append(text.upper().strip())
+            
+            # Look for given name field
+            given_name = None
+            for i, line in enumerate(text_lines):
+                # Look for "Given Name" or "Given Names" field using regex for better matching
+                if re.search(r'GIVEN\s+NAME', line, re.IGNORECASE):
+                    # Check if name is on the same line with colon separator
+                    if ':' in line:
+                        parts = line.split(':', 1)
+                        if len(parts) > 1 and parts[1].strip():
+                            given_name = parts[1].strip()
+                        else:
+                            # Name might be on next line
+                            if i + 1 < len(text_lines):
+                                given_name = text_lines[i + 1]
+                    elif '-' in line:
+                        # Handle dash separator (e.g., "GIVEN NAME - JOHN")
+                        parts = line.split('-', 1)
+                        if len(parts) > 1 and parts[1].strip():
+                            given_name = parts[1].strip()
+                        else:
+                            # Name might be on next line
+                            if i + 1 < len(text_lines):
+                                given_name = text_lines[i + 1]
+                    elif re.search(r'GIVEN\s+NAME\s*$', line, re.IGNORECASE):
+                        # Name might be on next line
+                        if i + 1 < len(text_lines):
+                            given_name = text_lines[i + 1]
+                    else:
+                        # Try to extract from the same line using regex
+                        match = re.search(r'GIVEN\s+NAME\s*[:\-\s]*([A-Z\s]+)', line, re.IGNORECASE)
+                        if match:
+                            given_name = match.group(1).strip()
+                        else:
+                            # If no name found after splitting, try next line
+                            if i + 1 < len(text_lines):
+                                given_name = text_lines[i + 1]
+                    break
+                # Also check for "FIRST NAME" field
+                elif re.search(r'FIRST\s+NAME', line, re.IGNORECASE):
+                    # Similar logic as above for FIRST NAME
+                    if ':' in line:
+                        parts = line.split(':', 1)
+                        if len(parts) > 1 and parts[1].strip():
+                            given_name = parts[1].strip()
+                        else:
+                            if i + 1 < len(text_lines):
+                                given_name = text_lines[i + 1]
+                    elif '-' in line:
+                        parts = line.split('-', 1)
+                        if len(parts) > 1 and parts[1].strip():
+                            given_name = parts[1].strip()
+                        else:
+                            if i + 1 < len(text_lines):
+                                given_name = text_lines[i + 1]
+                    elif re.search(r'FIRST\s+NAME\s*$', line, re.IGNORECASE):
+                        if i + 1 < len(text_lines):
+                            given_name = text_lines[i + 1]
+                    else:
+                        match = re.search(r'FIRST\s+NAME\s*[:\-\s]*([A-Z\s]+)', line, re.IGNORECASE)
+                        if match:
+                            given_name = match.group(1).strip()
+                        else:
+                            if i + 1 < len(text_lines):
+                                given_name = text_lines[i + 1]
+                    break
+            
+            if given_name:
+                # Clean the extracted name
+                given_name = given_name.strip()
+                # Remove common field labels that might have been captured
+                given_name = re.sub(r'^(NAME|NAMES|SURNAME|GIVEN)\s*[:\-]?\s*', '', given_name, flags=re.IGNORECASE)
+                # Remove any remaining common prefixes
+                given_name = re.sub(r'^(SURNAME|FAMILY NAME|LAST NAME|FIRST NAME)\s*[:\-]?\s*', '', given_name, flags=re.IGNORECASE)
+                # Remove any trailing field labels
+                given_name = re.sub(r'\s+(SURNAME|FAMILY NAME|LAST NAME|FIRST NAME|DATE|PLACE|NATIONALITY|SEX|PASSPORT)$', '', given_name, flags=re.IGNORECASE)
+                
+                # Remove trailing single-letter OCR artifacts (common K/X/Z/Q)
+                given_name = re.sub(r'\s*([KXZQ])$', '', given_name)
+                
+                # If the name is too long or contains unusual characters, it might be a false positive
+                if len(given_name) > 50 or any(char.isdigit() for char in given_name):
+                    return None
+                
+                # Apply OCR error correction
+                given_name = self.correct_common_ocr_errors(given_name)
+                
+                # Apply pattern-based corrections
+                given_name = self.correct_name_patterns(given_name)
+                
+                # Final validation
+                if len(given_name) < 2:
+                    return None
+                
+                logger.info(f"Extracted given name from visual zone: {given_name}")
+                    
+                return given_name
+                
+        except Exception as e:
+            logger.error(f"Error extracting given name from visual zone: {e}")
+        
+        return None
+
+    def get_data(self, img_path, airline=None):
         """
         Extracts full passport data from an image file.
         Returns a dictionary of extracted fields.
@@ -195,13 +492,74 @@ class PassportExtractor:
 
         line1, line2, mrz = self.extract_mrz_from_roi(img_path)
 
+        # If we have clean lines from EasyOCR, use them to create a new MRZ object
+        # to ensure data consistency, overriding any potentially faulty data from passporteye
+        if line1 and line2:
+            mrz = FallbackMRZ(line1, line2)
+
         if mrz is None:
+            logger.warning(f"Could not extract a valid MRZ from {img_path}")
             return None
+        
+        # ALWAYS try to extract given name from visual inspection zone first
+        visual_given_name = self.extract_given_name_from_visual_zone(img_path)
+        
+        # Safely get data from MRZ object
+        # FallbackMRZ has 'names', passporteye has 'name'. Let's check for both.
+        surname = clean_name_field(getattr(mrz, 'surname', ''))
+        
+        # Use visual given name if available and valid, otherwise fall back to MRZ
+        if visual_given_name and len(visual_given_name) > 1:
+            name = clean_name_field(visual_given_name)
+            logger.info(f"Using GIVEN NAME from visual zone: {name}")
+        else:
+            # Fallback to MRZ only if visual field not detected
+            name = clean_name_field(getattr(mrz, 'names', getattr(mrz, 'name', '')))
+            logger.warning("Visual given name not found, using MRZ name fallback.")
+
+        data = {
+            "surname": surname,
+            "name": name,
+            "country": get_country_name(getattr(mrz, 'country', '')),
+            "nationality": get_country_name(getattr(mrz, 'nationality', '')),
+            "passport_number": clean_string(getattr(mrz, 'number', '')),
+            "sex": get_sex(getattr(mrz, 'sex', '')),
+            "date_of_birth": parse_date(getattr(mrz, 'date_of_birth', '')),
+            "expiration_date": parse_date(getattr(mrz, 'expiration_date', '')),
+            "mrz_full_string": (line1 or "") + (line2 or ""),
+            "valid_score": getattr(mrz, 'valid_score', 0),
+        }
+        return data
+
+    def process_pdf(self, pdf_path, airline=None):
+        """
+        Extracts passport data from all pages of a PDF file.
+        Returns a list of dictionaries, one for each page with a valid MRZ.
+        """
+        if not os.path.exists(TEMP_DIR):
+            os.makedirs(TEMP_DIR)
+
+        try:
+            images = convert_from_path(pdf_path, dpi=300)
+            results = []
+            for i, img in enumerate(images):
+                page_path = os.path.join(TEMP_DIR, f"page_{i}.png")
+                img.save(page_path, 'PNG')
+                
+                data = self.get_data(page_path, airline=airline)
+                if data:
+                    data['source_page'] = i + 1
+                    results.append(data)
+            
+            return results
+        except Exception as e:
+            logger.error(f"PDF processing failed for {pdf_path}: {e}")
+            return []
 
         data = {}
         # Use PassportEye's parsing where possible, fallback/clean as needed
-        data['surname'] = mrz.surname.replace("<<", " ").strip().upper() if mrz.surname else ""
-        data['name'] = mrz.names.replace("<<", " ").strip().upper() if mrz.names else ""
+        data['surname'] = clean_name_field(mrz.surname)
+        data['name'] = clean_name_field(mrz.names)
         data['sex'] = get_sex(mrz.sex)
         data['date_of_birth'] = parse_date(mrz.date_of_birth) if mrz.date_of_birth else ""
         data['nationality'] = get_country_name(mrz.nationality)
@@ -211,12 +569,6 @@ class PassportExtractor:
         data['expiration_date'] = parse_date(mrz.expiration_date)
         data['personal_number'] = clean_string(mrz.personal_number)
         
-        # Fix: remove accidental trailing 'K' from names/surname caused by OCR/parse noise
-        # If the field ends with a single 'K' character (no separating space) it's likely an artifact.
-        for key in ('name', 'surname'):
-            val = data.get(key, "")
-            if val and val.endswith('K') and not val.endswith(' K') and len(val) > 2:
-                data[key] = val[:-1].strip()
         # Construct full MRZ string
         # Prefer the OCR'd lines if they exist, otherwise fallback?
         # The original code returned (line1 or "") + (line2 or "")
