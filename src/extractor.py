@@ -245,6 +245,92 @@ class PassportExtractor:
         
         return corrected_text
     
+    def correct_with_dictionary(self, text):
+        """
+        Apply dictionary-based corrections for common passport names and terms
+        """
+        if not text:
+            return text
+        
+        # Common name dictionary for passport context
+        name_dictionary = {
+            'AHMED': ['AHMED', 'AHMAD'],
+            'MOHAMMED': ['MOHAMMED', 'MOHAMED', 'MUHAMMAD', 'MUHAMMED'],
+            'ALI': ['ALI', 'ALLY'],
+            'HASSAN': ['HASSAN', 'HASAN'],
+            'HUSSEIN': ['HUSSEIN', 'HUSSEIN'],
+            'IBRAHIM': ['IBRAHIM', 'IBRAHEEM'],
+            'ABDUL': ['ABDUL', 'ABDUL'],
+            'RAHMAN': ['RAHMAN', 'RAHMAN'],
+            'KARIM': ['KARIM', 'KAREEM'],
+            'FATIMA': ['FATIMA', 'FATMA'],
+            'AISHA': ['AISHA', 'AIESHA'],
+            'MARYAM': ['MARYAM', 'MARIAM'],
+            'SARA': ['SARA', 'SARAH'],
+            'JOHN': ['JOHN', 'JON'],
+            'MICHAEL': ['MICHAEL', 'MIKE'],
+            'DAVID': ['DAVID', 'DAVE'],
+            'ROBERT': ['ROBERT', 'ROB', 'BOB'],
+            'WILLIAM': ['WILLIAM', 'WILL', 'BILL'],
+            'RICHARD': ['RICHARD', 'RICH', 'DICK'],
+            'CHARLES': ['CHARLES', 'CHARLIE'],
+            'JOSEPH': ['JOSEPH', 'JOE'],
+            'THOMAS': ['THOMAS', 'TOM'],
+            'CHRISTOPHER': ['CHRISTOPHER', 'CHRIS'],
+            'DANIEL': ['DANIEL', 'DAN'],
+            'MATTHEW': ['MATTHEW', 'MATT'],
+            'ANTHONY': ['ANTHONY', 'TONY'],
+            'DONALD': ['DONALD', 'DON'],
+            'KENNETH': ['KENNETH', 'KEN'],
+            'PAUL': ['PAUL', 'PAUL'],
+            'STEVEN': ['STEVEN', 'STEVE'],
+            'ANDREW': ['ANDREW', 'ANDY'],
+            'JOSHUA': ['JOSHUA', 'JOSH'],
+            'KEVIN': ['KEVIN', 'KEV'],
+            'BRIAN': ['BRIAN', 'BRIAN'],
+            'GEORGE': ['GEORGE', 'GEORGE'],
+            'EDWARD': ['EDWARD', 'ED', 'EDDIE'],
+            'RONALD': ['RONALD', 'RON'],
+            'TIMOTHY': ['TIMOTHY', 'TIM'],
+            'JASON': ['JASON', 'JASON'],
+            'JEFFREY': ['JEFFREY', 'JEFF'],
+            'RYAN': ['RYAN', 'RYAN'],
+            'JACOB': ['JACOB', 'JAKE'],
+            'GARY': ['GARY', 'GARY'],
+            'NICHOLAS': ['NICHOLAS', 'NICK'],
+            'ERIC': ['ERIC', 'ERIC'],
+            'JONATHAN': ['JONATHAN', 'JON'],
+            'STEPHEN': ['STEPHEN', 'STEVE'],
+            'LARRY': ['LARRY', 'LARRY'],
+            'JUSTIN': ['JUSTIN', 'JUSTIN'],
+            'SCOTT': ['SCOTT', 'SCOTT'],
+            'BRANDON': ['BRANDON', 'BRANDON'],
+            'BENJAMIN': ['BENJAMIN', 'BEN'],
+            'SAMUEL': ['SAMUEL', 'SAM'],
+            'GREGORY': ['GREGORY', 'GREG'],
+            'ALEXANDER': ['ALEXANDER', 'ALEX'],
+            'PATRICK': ['PATRICK', 'PAT'],
+            'FRANK': ['FRANK', 'FRANK']
+        }
+        
+        # Split text into words
+        words = text.split()
+        corrected_words = []
+        
+        for word in words:
+            word_upper = word.upper()
+            corrected_word = word
+            
+            # Check if word is in our dictionary
+            for correct_name, variations in name_dictionary.items():
+                if word_upper in variations:
+                    corrected_word = correct_name
+                    break
+            
+            corrected_words.append(corrected_word)
+        
+        return ' '.join(corrected_words)
+    
     def correct_name_patterns(self, name):
         """
         Apply pattern-based corrections for common name OCR errors
