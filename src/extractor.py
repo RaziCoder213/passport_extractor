@@ -278,17 +278,25 @@ class PassportExtractor:
                 given_name = re.sub(r'\s+(SURNAME|FAMILY NAME|LAST NAME|FIRST NAME|DATE|PLACE|NATIONALITY|SEX|PASSPORT)$', '', given_name, flags=re.IGNORECASE)
                 
                 # Handle OCR artifacts - remove trailing single letters
+                # Only remove specific OCR artifacts that are clearly not part of names
+                # Common OCR artifacts: K, X, Z, Q (letters that appear as artifacts)
+                # But only if they appear as single letters at the end
+                
                 # Case 1: Single uppercase letter at the end attached to name (like "SYEDIBRAHEEMK")
-                # Only remove if it's a single letter and not part of a valid name ending
                 if len(given_name) > 3 and given_name[-1].isupper() and not given_name[-2].isspace():
-                    # Check if removing it would leave a valid name (at least 2 characters)
-                    if len(given_name[:-1]) >= 2:
-                        given_name = given_name[:-1]
+                    # Only remove common OCR artifact letters (K, X, Z, Q)
+                    if given_name[-1] in ['K', 'X', 'Z', 'Q']:
+                        # Check if removing it would leave a valid name (at least 2 characters)
+                        if len(given_name[:-1]) >= 2:
+                            given_name = given_name[:-1]
+                
                 # Case 2: Single uppercase letter separated by space (like "SYED IBRAHEEM K")
                 elif len(given_name) > 2 and given_name[-1].isupper() and given_name[-2] == ' ':
-                    # Check if removing it would leave a valid name
-                    if len(given_name[:-2].rstrip()) >= 2:
-                        given_name = given_name[:-2].rstrip()
+                    # Only remove common OCR artifact letters
+                    if given_name[-1] in ['K', 'X', 'Z', 'Q']:
+                        # Check if removing it would leave a valid name
+                        if len(given_name[:-2].rstrip()) >= 2:
+                            given_name = given_name[:-2].rstrip()
                 
                 # If the name is too long or contains unusual characters, it might be a false positive
                 if len(given_name) > 50 or any(char.isdigit() for char in given_name):
