@@ -4,12 +4,13 @@ import numpy as np
 import easyocr
 import warnings
 import ssl
+import re
 from passporteye import read_mrz
 from pdf2image import convert_from_path
 from PIL import Image
 import string as st
 
-# Fix SSL issue (Mac EasyOCR model download fix)
+# Fix SSL issue
 try:
     _create_unverified_https_context = ssl._create_unverified_context
 except AttributeError:
@@ -35,6 +36,7 @@ logger = setup_logger(__name__)
 
 
 class PassportExtractor:
+
     def __init__(self, use_gpu=USE_GPU, languages=None):
         self.languages = languages if languages else OCR_LANGUAGES
 
@@ -49,57 +51,55 @@ class PassportExtractor:
             model_storage_directory=model_dir
         )
         logger.info("EasyOCR initialized.")
-        
-import re
 
-def extract_given_names_from_visual(self, img_path):
-    """
-    Extract name from visible 'Given Names' field
-    and remove OCR garbage at the end.
-    """
-    try:
-        results = self.reader.readtext(img_path, detail=0)
-        lines = [r.strip() for r in results if r.strip()]
+    # ---------------------------------------------------
+    # 🔥 VISUAL GIVEN NAMES EXTRACTION (CLEANED)
+    # ---------------------------------------------------
+    def extract_given_names_from_visual(self, img_path):
+        try:
+            results = self.reader.readtext(img_path, detail=0)
+            lines = [r.strip() for r in results if r.strip()]
 
-        for i, line in enumerate(lines):
-            upper_line = line.upper()
+            for i, line in enumerate(lines):
+                upper_line = line.upper()
 
-            if "GIVEN" in upper_line and "NAME" in upper_line:
+                if "GIVEN" in upper_line and "NAME" in upper_line:
 
-                # Case 1: Same line
-                if ":" in line:
-                    candidate = line.split(":")[1].strip()
-                else:
-                    # Case 2: Next line
-                    if i + 1 < len(lines):
-                        candidate = lines[i + 1].strip()
+                    # Same line format
+                    if ":" in line:
+                        candidate = line.split(":")[1].strip()
                     else:
-                        return ""
+                        # Next line format
+                        if i + 1 < len(lines):
+                            candidate = lines[i + 1].strip()
+                        else:
+                            return ""
 
-                # -----------------------------
-                # 🔥 CLEAN THE NAME PROPERLY
-                # -----------------------------
+                    # -----------------------------
+                    # STRONG CLEANING
+                    # -----------------------------
 
-                # Keep only letters and spaces
-                candidate = re.sub(r'[^A-Za-z\s]', '', candidate)
+                    # Remove non letters
+                    candidate = re.sub(r'[^A-Za-z\s]', '', candidate)
 
-                # Remove extra single letter at end (like K)
-                words = candidate.split()
+                    # Remove merged trailing capital letter
+                    # Example: IBRAHEEMK -> IBRAHEEM
+                    candidate = re.sub(r'([A-Za-z]+)[A-Z]$', r'\1', candidate)
 
-                # If last word is 1 character, remove it
-                if len(words) > 1 and len(words[-1]) == 1:
-                    words = words[:-1]
+                    # Remove single-letter last word
+                    words = candidate.split()
+                    if len(words) > 1 and len(words[-1]) == 1:
+                        words = words[:-1]
 
-                cleaned_name = " ".join(words)
+                    cleaned_name = " ".join(words)
 
-                return cleaned_name.strip()
+                    return cleaned_name.strip()
 
-        return ""
+            return ""
 
-    except Exception as e:
-        logger.error(f"Given Names extraction failed: {e}")
-        return ""
-
+        except Exception as e:
+            logger.error(f"Given Names extraction failed: {e}")
+            return ""
 
     # ---------------------------------------------------
     # MRZ EXTRACTION
@@ -141,6 +141,7 @@ def extract_given_names_from_visual(self, img_path):
     # MAIN DATA FUNCTION
     # ---------------------------------------------------
     def get_data(self, img_path):
+
         if not os.path.exists(img_path):
             logger.error(f"File not found: {img_path}")
             return None
@@ -154,10 +155,9 @@ def extract_given_names_from_visual(self, img_path):
             logger.warning("MRZ not detected.")
             return None
 
-        # 🔥 Get surname from MRZ
         surname = clean_name_field(getattr(mrz, "surname", ""))
 
-        # 🔥 Get name from visual GIVEN NAMES field
+        # 🔥 VISUAL NAME EXTRACTION
         visual_name = self.extract_given_names_from_visual(img_path)
 
         if visual_name:
