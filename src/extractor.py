@@ -96,77 +96,6 @@ class PassportExtractor:
             else:
                 return image
 
-    def _retry_with_rotation(self, img_path):
-        """Try rotating image 90, 180, 270 degrees to find MRZ."""
-        try:
-            original = Image.open(img_path)
-            
-            for angle in [90, 180, 270]:
-                logger.info(f"Retrying with rotation: {angle} degrees")
-                # expand=True ensures the whole image is kept
-                rotated = original.rotate(angle, expand=True)
-                
-                # Save to a temp file
-                temp_rot_path = img_path + f"_rot_{angle}.png"
-                rotated.save(temp_rot_path)
-                
-                mrz = read_mrz(temp_rot_path, save_roi=True)
-                
-                # Cleanup
-                if os.path.exists(temp_rot_path):
-                    os.remove(temp_rot_path)
-                
-                if mrz:
-                    logger.info(f"MRZ detected after rotation {angle}")
-                    return mrz
-                    
-            return None
-        except Exception as e:
-            logger.error(f"Rotation fallback failed: {e}")
-            return None
-
-    def _fallback_direct_easyocr(self, img_path):
-        """
-        Fallback method: Read the entire image with EasyOCR and try to find MRZ lines.
-        """
-        try:
-            # Read full image
-            # detail=0 returns just the list of strings
-            result = self.reader.readtext(img_path, detail=0)
-            
-            # Filter and clean lines
-            potential_lines = []
-            for line in result:
-                clean = clean_mrz_line(line)
-                # Heuristic: MRZ lines are usually long (30-44 chars) and contain '<<' or start with P<, I<
-                if len(clean) > 30 and ('<<' in clean or clean.startswith(('P<', 'I<', 'A<', 'V<'))):
-                    potential_lines.append(clean)
-            
-            # Look for the last two valid lines (TD3 format usually has 2 lines at the bottom)
-            if len(potential_lines) >= 2:
-                # Assume the last two are the MRZ
-                line1 = potential_lines[-2]
-                line2 = potential_lines[-1]
-                
-                # Basic validation: Line 1 usually starts with P, I, A, V
-                if not line1[0] in 'PIAV':
-                     # Maybe we picked wrong lines. Let's look for a line starting with P/I/A/V
-                     for i, l in enumerate(potential_lines):
-                         if l.startswith(('P<', 'I<', 'A<', 'V<')) and i+1 < len(potential_lines):
-                             line1 = l
-                             line2 = potential_lines[i+1]
-                             break
-                
-                logger.info(f"Direct EasyOCR found potential MRZ: {line1} / {line2}")
-                mrz_obj = FallbackMRZ(line1, line2)
-                return line1, line2, mrz_obj
-            
-            return None, None, None
-
-        except Exception as e:
-            logger.error(f"Direct EasyOCR fallback failed: {e}")
-            return None, None, None
-
     def find_mrz_region(self, image):
         """
         Find the MRZ region in the image using morphological operations.
@@ -277,7 +206,7 @@ class PassportExtractor:
             return {"error": "File not found"}
 
         try:
-            # 0. First, try barcode detection (if available)
+            # 1. First, try barcode detection (if available)
             barcode_data = self.extract_from_barcode(img_path)
             if barcode_data:
                 logger.info("Successfully extracted data from barcode")
@@ -285,12 +214,12 @@ class PassportExtractor:
                 barcode_data["mrz_string"] = ""
                 return barcode_data
 
-            # Load image with OpenCV
+            # 2. If barcode fails, try MRZ region detection and OCR only the MRZ
             image = cv2.imread(img_path)
             if image is None:
                 return {"error": "Could not read image"}
 
-            # 1. Try to find MRZ region first
+            # Find MRZ region and OCR only that area
             mrz_coords = self.find_mrz_region(image)
             mrz_lines = []
             if mrz_coords:
@@ -307,24 +236,13 @@ class PassportExtractor:
                     # Assume the last two lines are the MRZ
                     mrz_lines = [clean_mrz_line(line) for line in result[-2:]]
             
-            # 2. If MRZ not found with our method, use PassportEye
+            # 3. If MRZ region detection fails, try PassportEye
             if not mrz_lines:
                 mrz = read_mrz(img_path, save_roi=True)
                 if mrz:
                     mrz_lines = [clean_mrz_line(line) for line in mrz.aux['mrz_text'].split('\n')]
-                else:
-                    # 3. Fallback to rotation
-                    mrz = self._retry_with_rotation(img_path)
-                    if mrz:
-                        mrz_lines = [clean_mrz_line(line) for line in mrz.aux['mrz_text'].split('\n')]
 
-            # 4. If still no MRZ, use direct EasyOCR fallback
-            if not mrz_lines:
-                line1, line2, _ = self._fallback_direct_easyocr(img_path)
-                if line1 and line2:
-                    mrz_lines = [line1, line2]
-
-            # If we have MRZ lines, parse them
+            # 4. If we have MRZ lines, parse them
             if mrz_lines and len(mrz_lines) >= 2:
                 line1, line2 = mrz_lines[-2], mrz_lines[-1]
                 mrz_obj = FallbackMRZ(line1, line2)
@@ -344,9 +262,9 @@ class PassportExtractor:
                 }
                 return passport_data
 
-            # 5. If all MRZ methods fail, return an error
-            logger.error("All MRZ detection methods failed.")
-            return {"error": "Could not extract MRZ from the image."}
+            # 5. If all methods fail, return an error
+            logger.error("All extraction methods failed.")
+            return {"error": "Could not extract data from the image."}
 
         except Exception as e:
             logger.error(f"An error occurred during get_data: {e}")
