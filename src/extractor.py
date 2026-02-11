@@ -9,7 +9,7 @@ from pdf2image import convert_from_path
 from PIL import Image
 import string as st
 
-# Fix SSL issues (Mac + EasyOCR)
+# Fix SSL certificate issues (Mac + EasyOCR)
 try:
     _create_unverified_https_context = ssl._create_unverified_context
 except AttributeError:
@@ -44,115 +44,173 @@ class PassportExtractor:
         model_dir = os.path.join(base_dir, "data", "models")
         os.makedirs(model_dir, exist_ok=True)
 
-        logger.info(f"Initializing EasyOCR (GPU={use_gpu})...")
+        logger.info(f"Initializing EasyOCR Reader (GPU={use_gpu})...")
         self.reader = easyocr.Reader(
             self.languages,
             gpu=use_gpu,
             model_storage_directory=model_dir
         )
-        logger.info("EasyOCR Ready.")
+        logger.info("EasyOCR Reader initialized.")
 
     # --------------------------------------------------
     # ROTATION FALLBACK
     # --------------------------------------------------
     def _retry_with_rotation(self, img_path):
-        original = Image.open(img_path)
+        try:
+            original = Image.open(img_path)
 
-        for angle in [90, 180, 270]:
-            rotated = original.rotate(angle, expand=True)
-            temp_path = img_path + f"_rot_{angle}.png"
-            rotated.save(temp_path)
+            for angle in [90, 180, 270]:
+                logger.info(f"Retrying with rotation: {angle}")
+                rotated = original.rotate(angle, expand=True)
 
-            mrz = read_mrz(temp_path)
+                temp_path = img_path + f"_rot_{angle}.png"
+                rotated.save(temp_path)
 
-            os.remove(temp_path)
+                mrz = read_mrz(temp_path, save_roi=True)
 
-            if mrz:
-                logger.info(f"MRZ found after rotation {angle}")
-                return mrz
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
 
-        return None
+                if mrz:
+                    logger.info(f"MRZ detected after rotation {angle}")
+                    return mrz
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Rotation fallback failed: {e}")
+            return None
 
     # --------------------------------------------------
-    # DIRECT EASY OCR FALLBACK
+    # DIRECT EASYOCR FALLBACK
     # --------------------------------------------------
     def _fallback_direct_easyocr(self, img_path):
-        result = self.reader.readtext(img_path, detail=0)
+        try:
+            result = self.reader.readtext(img_path, detail=0)
 
-        potential = []
-        for line in result:
-            clean = clean_mrz_line(line)
-            if len(clean) > 30 and ("<<" in clean or clean.startswith(("P<", "I<"))):
-                potential.append(clean)
+            potential_lines = []
+            for line in result:
+                clean = clean_mrz_line(line)
+                if len(clean) > 30 and (
+                    "<<" in clean or clean.startswith(("P<", "I<", "A<", "V<"))
+                ):
+                    potential_lines.append(clean)
 
-        if len(potential) >= 2:
-            line1 = potential[-2]
-            line2 = potential[-1]
+            if len(potential_lines) >= 2:
+                line1 = potential_lines[-2]
+                line2 = potential_lines[-1]
+
+                if not line1.startswith(("P<", "I<", "A<", "V<")):
+                    for i, l in enumerate(potential_lines):
+                        if l.startswith(("P<", "I<", "A<", "V<")) and i + 1 < len(potential_lines):
+                            line1 = l
+                            line2 = potential_lines[i + 1]
+                            break
+
+                logger.info("Direct EasyOCR found potential MRZ")
+                return line1, line2, FallbackMRZ(line1, line2)
+
+            return None, None, None
+
+        except Exception as e:
+            logger.error(f"Direct EasyOCR fallback failed: {e}")
+            return None, None, None
+
+    # --------------------------------------------------
+    # MRZ EXTRACTION
+    # --------------------------------------------------
+    def extract_mrz_from_roi(self, img_path):
+        try:
+            mrz = read_mrz(img_path, save_roi=True)
+
+            if not mrz:
+                logger.warning("PassportEye failed. Trying rotation...")
+                mrz = self._retry_with_rotation(img_path)
+
+            if not mrz:
+                logger.warning("Rotation failed. Using full image OCR fallback...")
+                return self._fallback_direct_easyocr(img_path)
+
+            roi = mrz.aux["roi"]
+            h, w = roi.shape[:2]
+
+            # Crop bottom portion
+            roi = roi[int(h * 0.6):h, :]
+
+            if roi.dtype != np.uint8:
+                if roi.max() <= 1.0:
+                    roi = (roi * 255).astype(np.uint8)
+                else:
+                    roi = roi.astype(np.uint8)
+
+            if len(roi.shape) == 3:
+                gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+            else:
+                gray = roi
+
+            denoised = cv2.bilateralFilter(gray, 9, 75, 75)
+
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 5))
+            blackhat = cv2.morphologyEx(denoised, cv2.MORPH_BLACKHAT, kernel)
+
+            norm = cv2.normalize(blackhat, None, 0, 255, cv2.NORM_MINMAX)
+
+            _, thresh = cv2.threshold(
+                norm, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
+            )
+
+            small_kernel = np.ones((2, 2), np.uint8)
+            cleaned = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, small_kernel)
+
+            scale = 140 / cleaned.shape[0]
+            resized = cv2.resize(
+                cleaned,
+                (int(cleaned.shape[1] * scale), 140)
+            )
+
+            allow = st.ascii_uppercase + st.digits + "<"
+
+            code = self.reader.readtext(
+                resized,
+                detail=0,
+                allowlist=allow,
+                paragraph=False,
+                width_ths=0.5,
+                height_ths=0.5
+            )
+
+            if len(code) < 2:
+                logger.warning("EasyOCR found fewer than 2 lines.")
+                return None, None, mrz
+
+            line1 = strict_mrz_filter(
+                correct_mrz_common_errors(clean_mrz_line(code[0]))
+            )
+            line2 = strict_mrz_filter(
+                correct_mrz_common_errors(clean_mrz_line(code[1]))
+            )
+
             return line1, line2, FallbackMRZ(line1, line2)
 
-        return None, None, None
-
-    # --------------------------------------------------
-    # MAIN MRZ EXTRACTION
-    # --------------------------------------------------
-    def extract_mrz(self, img_path):
-        mrz = read_mrz(img_path)
-
-        if not mrz:
-            mrz = self._retry_with_rotation(img_path)
-
-        if not mrz:
-            return self._fallback_direct_easyocr(img_path)
-
-        roi = mrz.aux["roi"]
-        h = roi.shape[0]
-        roi = roi[int(h * 0.6):h, :]
-
-        if len(roi.shape) == 3:
-            roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-
-        roi = cv2.bilateralFilter(roi, 9, 75, 75)
-
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 5))
-        blackhat = cv2.morphologyEx(roi, cv2.MORPH_BLACKHAT, kernel)
-
-        _, thresh = cv2.threshold(
-            blackhat, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
-        )
-
-        scale = 140 / thresh.shape[0]
-        resized = cv2.resize(thresh, (int(thresh.shape[1] * scale), 140))
-
-        allow = st.ascii_uppercase + st.digits + "<"
-
-        text = self.reader.readtext(
-            resized,
-            detail=0,
-            allowlist=allow
-        )
-
-        if len(text) < 2:
-            return None, None, mrz
-
-        line1 = strict_mrz_filter(
-            correct_mrz_common_errors(clean_mrz_line(text[0]))
-        )
-        line2 = strict_mrz_filter(
-            correct_mrz_common_errors(clean_mrz_line(text[1]))
-        )
-
-        return line1, line2, FallbackMRZ(line1, line2)
+        except Exception as e:
+            logger.error(f"MRZ extraction failed: {e}")
+            return None, None, None
 
     # --------------------------------------------------
     # DATA EXTRACTION
     # --------------------------------------------------
-    def get_data(self, img_path):
+    def get_data(self, img_path, airline=None):
         if not os.path.exists(img_path):
+            logger.error(f"File not found: {img_path}")
             return None
 
-        line1, line2, mrz = self.extract_mrz(img_path)
+        line1, line2, mrz = self.extract_mrz_from_roi(img_path)
+
+        if line1 and line2:
+            mrz = FallbackMRZ(line1, line2)
 
         if not mrz:
+            logger.warning("No valid MRZ extracted.")
             return None
 
         surname = clean_name_field(getattr(mrz, "surname", ""))
@@ -176,21 +234,28 @@ class PassportExtractor:
     # --------------------------------------------------
     # PDF PROCESSING
     # --------------------------------------------------
-    def process_pdf(self, pdf_path):
+    def process_pdf(self, pdf_path, airline=None):
         os.makedirs(TEMP_DIR, exist_ok=True)
 
-        pages = convert_from_path(pdf_path, dpi=300)
+        try:
+            pages = convert_from_path(pdf_path, dpi=300)
+        except Exception as e:
+            logger.error(f"PDF conversion failed: {e}")
+            return []
+
         results = []
 
         for i, page in enumerate(pages):
             temp_path = os.path.join(TEMP_DIR, f"page_{i}.png")
             page.save(temp_path, "PNG")
 
-            data = self.get_data(temp_path)
+            data = self.get_data(temp_path, airline=airline)
+
             if data:
                 data["source_page"] = i + 1
                 results.append(data)
 
-            os.remove(temp_path)
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
 
         return results
