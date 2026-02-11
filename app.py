@@ -28,14 +28,15 @@ def process_pdf_file(uploaded_file, use_gpu=False, airline="flydubai"):
     """
     extractor = PassportExtractor(use_gpu=use_gpu)
     results = []
-
-    # Save uploaded file to temporary location
-    suffix = os.path.splitext(uploaded_file.name)[1]
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        tmp.write(uploaded_file.getvalue())
-        tmp_path = tmp.name
+    tmp_path = None
 
     try:
+        # Save uploaded file to temporary location
+        suffix = os.path.splitext(uploaded_file.name)[1]
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(uploaded_file.getvalue())
+            tmp_path = tmp.name
+
         # Extract passport data from PDF with airline-specific formatting
         results = extractor.process_pdf(tmp_path, airline=airline.lower(), progress_callback=None)
         if not results:
@@ -47,12 +48,17 @@ def process_pdf_file(uploaded_file, use_gpu=False, airline="flydubai"):
 
     except Exception as e:
         print(f"❌ Error processing {uploaded_file.name}: {str(e)}")
+        import traceback
+        print(f"Debug info: {traceback.format_exc()}")
         results = []
 
     finally:
         # Clean up temp file
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception as cleanup_error:
+                print(f"Warning: Could not clean up temp file: {cleanup_error}")
 
     return results
 
@@ -153,9 +159,16 @@ def main():
                     
                 except Exception as e:
                     st.error(f"❌ Error processing {file.name}: {str(e)}")
+                    import traceback
+                    st.error(f"Debug info: {traceback.format_exc()}")
                     
                 finally:
-                    os.remove(tmp_path)
+                    # Safely remove temp file
+                    try:
+                        if os.path.exists(tmp_path):
+                            os.remove(tmp_path)
+                    except Exception as cleanup_error:
+                        st.warning(f"Warning: Could not clean up temp file: {cleanup_error}")
                 
                 # Update main progress bar
                 main_progress_bar.progress((i + 1) / len(uploaded_files))
