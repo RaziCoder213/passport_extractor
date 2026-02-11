@@ -170,3 +170,35 @@ class PassportExtractor:
         }
 
         return data
+
+    # ---------------------------------------------------
+    # PDF PROCESSING
+    # ---------------------------------------------------
+    def process_pdf(self, pdf_path):
+        """Process a PDF file and extract passport data from all pages."""
+        try:
+            # Convert PDF to images
+            images = convert_from_path(pdf_path)
+            results = []
+            
+            for i, image in enumerate(images):
+                # Save temporary image
+                temp_image_path = os.path.join(TEMP_DIR, f"temp_page_{i}.jpg")
+                image.save(temp_image_path, 'JPEG')
+                
+                try:
+                    # Extract data from this page
+                    result = self.get_data(temp_image_path)
+                    if result:
+                        result['page_number'] = i + 1
+                        results.append(result)
+                finally:
+                    # Clean up temporary file
+                    if os.path.exists(temp_image_path):
+                        os.remove(temp_image_path)
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"PDF processing failed for {pdf_path}: {e}")
+            return []
