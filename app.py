@@ -37,7 +37,7 @@ def process_pdf_file(uploaded_file, use_gpu=False, airline="flydubai"):
 
     try:
         # Extract passport data from PDF with airline-specific formatting
-        results = extractor.process_pdf(tmp_path, airline=airline.lower())
+        results = extractor.process_pdf(tmp_path, airline=airline.lower(), progress_callback=None)
         if not results:
             print(f"⚠️ No passport data found in PDF: {uploaded_file.name}")
 
