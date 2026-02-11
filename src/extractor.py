@@ -572,6 +572,9 @@ class PassportExtractor:
                 # Apply pattern-based corrections
                 given_name = self.correct_name_patterns(given_name)
                 
+                # Apply dictionary-based corrections
+                given_name = self.correct_with_dictionary(given_name)
+                
                 # Final validation
                 if len(given_name) < 2:
                     return None
