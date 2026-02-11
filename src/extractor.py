@@ -53,11 +53,34 @@ class PassportExtractor:
         logger.info("EasyOCR initialized.")
 
     # ---------------------------------------------------
-    # 🔥 VISUAL GIVEN NAMES EXTRACTION (CLEANED)
+    # 🔥 REGION-BASED GIVEN NAME EXTRACTION (FIXED)
     # ---------------------------------------------------
     def extract_given_names_from_visual(self, img_path):
+
         try:
-            results = self.reader.readtext(img_path, detail=0)
+            image = cv2.imread(img_path)
+
+            if image is None:
+                return ""
+
+            h, w, _ = image.shape
+
+            # -------------------------------
+            # CROP REGION FOR PAK PASSPORT
+            # -------------------------------
+            # Adjusted for NADRA layout
+            crop = image[int(h*0.28):int(h*0.50),
+                         int(w*0.20):int(w*0.80)]
+
+            # Convert to grayscale
+            gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+
+            # Improve OCR clarity
+            gray = cv2.GaussianBlur(gray, (3, 3), 0)
+            _, thresh = cv2.threshold(gray, 0, 255,
+                                       cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+            results = self.reader.readtext(thresh, detail=0)
             lines = [r.strip() for r in results if r.strip()]
 
             for i, line in enumerate(lines):
@@ -65,35 +88,24 @@ class PassportExtractor:
 
                 if "GIVEN" in upper_line and "NAME" in upper_line:
 
-                    # Same line format
-                    if ":" in line:
-                        candidate = line.split(":")[1].strip()
+                    if i + 1 < len(lines):
+                        candidate = lines[i + 1].strip()
                     else:
-                        # Next line format
-                        if i + 1 < len(lines):
-                            candidate = lines[i + 1].strip()
-                        else:
-                            return ""
+                        return ""
 
-                    # -----------------------------
-                    # STRONG CLEANING
-                    # -----------------------------
-
-                    # Remove non letters
+                    # --------------------------
+                    # CLEAN NAME PROPERLY
+                    # --------------------------
                     candidate = re.sub(r'[^A-Za-z\s]', '', candidate)
+                    candidate = candidate.strip()
 
-                    # Remove merged trailing capital letter
-                    # Example: IBRAHEEMK -> IBRAHEEM
-                    candidate = re.sub(r'([A-Za-z]+)[A-Z]$', r'\1', candidate)
+                    # REMOVE TRAILING BLEED CHARACTER
+                    if candidate.isupper() and len(candidate) > 5:
+                        candidate = candidate[:-1]
 
-                    # Remove single-letter last word
-                    words = candidate.split()
-                    if len(words) > 1 and len(words[-1]) == 1:
-                        words = words[:-1]
+                    candidate = " ".join(candidate.split())
 
-                    cleaned_name = " ".join(words)
-
-                    return cleaned_name.strip()
+                    return candidate
 
             return ""
 
@@ -105,6 +117,7 @@ class PassportExtractor:
     # MRZ EXTRACTION
     # ---------------------------------------------------
     def extract_mrz_from_roi(self, img_path):
+
         try:
             mrz = read_mrz(img_path, save_roi=True)
 
@@ -138,7 +151,7 @@ class PassportExtractor:
             return None, None, None
 
     # ---------------------------------------------------
-    # MAIN DATA FUNCTION
+    # MAIN FUNCTION
     # ---------------------------------------------------
     def get_data(self, img_path):
 
@@ -157,7 +170,6 @@ class PassportExtractor:
 
         surname = clean_name_field(getattr(mrz, "surname", ""))
 
-        # 🔥 VISUAL NAME EXTRACTION
         visual_name = self.extract_given_names_from_visual(img_path)
 
         if visual_name:
@@ -183,9 +195,10 @@ class PassportExtractor:
         return data
 
     # ---------------------------------------------------
-    # PDF PROCESSING
+    # PDF SUPPORT
     # ---------------------------------------------------
     def process_pdf(self, pdf_path):
+
         extracted_data = []
         os.makedirs(TEMP_DIR, exist_ok=True)
 
