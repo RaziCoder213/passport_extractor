@@ -180,6 +180,9 @@ class PassportExtractor:
         try:
             from pdf2image import pdfinfo_from_path
             
+            # Ensure temp directory exists before processing
+            os.makedirs(TEMP_DIR, exist_ok=True)
+            
             # Check file size for Streamlit free tier (max 10 MB)
             file_size = os.path.getsize(pdf_path)
             if file_size > 10 * 1024 * 1024:  # 10 MB limit
