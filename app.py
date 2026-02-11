@@ -108,110 +108,147 @@ def main():
         accept_multiple_files=True
     )
 
-    if uploaded_files:
+    # Initialize session state to prevent crashes from rapid clicks
+    if 'processing' not in st.session_state:
+        st.session_state.processing = False
+
+    if uploaded_files and not st.session_state.processing:
         if st.button("Extract Data"):
-            # Initialize extractor inside the button click to use the latest settings
-            extractor = PassportExtractor(use_gpu=use_gpu)
-            
-            all_results = []
-            main_progress_bar = st.progress(0)
-            
-            for i, file in enumerate(uploaded_files):
-                st.write(f"Processing file {i+1} of {len(uploaded_files)}: {file.name}")
+            st.session_state.processing = True
+            try:
+                # Initialize extractor inside the button click to use the latest settings
+                extractor = PassportExtractor(use_gpu=use_gpu)
                 
-                # Check file size for Streamlit free tier
-                file_size = len(file.getvalue())
-                if file_size > 10 * 1024 * 1024:  # 10 MB
-                    st.error(f"❌ File too large: {file.name} ({file_size / (1024*1024):.1f} MB). Max 10 MB allowed.")
-                    main_progress_bar.progress((i + 1) / len(uploaded_files))
-                    continue
+                all_results = []
                 
-                with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.name)[1]) as tmp:
-                    tmp.write(file.getvalue())
-                    tmp_path = tmp.name
+                # Create a container for processing status
+                status_container = st.container()
+                progress_container = st.container()
                 
-                try:
-                    # Check both MIME type and file extension for PDF detection
-                    is_pdf = file.type == "application/pdf" or file.name.lower().endswith('.pdf')
+                with progress_container:
+                    main_progress_bar = st.progress(0)
+                
+                for i, file in enumerate(uploaded_files):
+                    with status_container:
+                        st.write(f"Processing file {i+1} of {len(uploaded_files)}: {file.name}")
                     
-                    if is_pdf:
-                        st.write(f"📄 Processing as PDF: {file.name} (type: {file.type})")
-                        
-                        try:
-                            # Use the new standalone PDF processing function
-                            results = process_pdf_file(file, use_gpu=use_gpu, airline=airline.lower())
-                            if not results:
-                                st.warning(f"⚠️ No passport data found in PDF: {file.name}")
-                        except Exception as e:
-                            st.error(f"❌ PDF processing failed for {file.name}: {str(e)}")
-                            results = []
-                            
-                    else:
-                        st.write(f"🖼️ Processing as image: {file.name} (type: {file.type})")
-                        result = extractor.get_data(tmp_path, airline=airline.lower())
-                        results = [result] if result else []
-                        if not results:
-                            st.warning(f"⚠️ No passport data found in image: {file.name}")
-                    
-                    for res in results:
-                        res['source_file'] = file.name
-                    all_results.extend(results)
-                    
-                except Exception as e:
-                    st.error(f"❌ Error processing {file.name}: {str(e)}")
-                    import traceback
-                    st.error(f"Debug info: {traceback.format_exc()}")
-                    
-                finally:
-                    # Safely remove temp file
+                    # Check file size for Streamlit free tier
                     try:
-                        if os.path.exists(tmp_path):
-                            os.remove(tmp_path)
-                    except Exception as cleanup_error:
-                        st.warning(f"Warning: Could not clean up temp file: {cleanup_error}")
+                        file_size = len(file.getvalue())
+                        if file_size > 10 * 1024 * 1024:  # 10 MB
+                            st.error(f"❌ File too large: {file.name} ({file_size / (1024*1024):.1f} MB). Max 10 MB allowed.")
+                            with progress_container:
+                                main_progress_bar.progress((i + 1) / len(uploaded_files))
+                            continue
+                    except Exception as e:
+                        st.error(f"❌ Error checking file size for {file.name}: {str(e)}")
+                        with progress_container:
+                            main_progress_bar.progress((i + 1) / len(uploaded_files))
+                        continue
+                    
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.name)[1]) as tmp:
+                        tmp.write(file.getvalue())
+                        tmp_path = tmp.name
+                    
+                    try:
+                        # Check both MIME type and file extension for PDF detection
+                        is_pdf = file.type == "application/pdf" or file.name.lower().endswith('.pdf')
+                        
+                        if is_pdf:
+                            st.write(f"📄 Processing as PDF: {file.name} (type: {file.type})")
+                            
+                            try:
+                                # Use the new standalone PDF processing function
+                                results = process_pdf_file(file, use_gpu=use_gpu, airline=airline.lower())
+                                if not results:
+                                    st.warning(f"⚠️ No passport data found in PDF: {file.name}")
+                            except Exception as e:
+                                st.error(f"❌ PDF processing failed for {file.name}: {str(e)}")
+                                results = []
+                                
+                        else:
+                            st.write(f"🖼️ Processing as image: {file.name} (type: {file.type})")
+                            result = extractor.get_data(tmp_path, airline=airline.lower())
+                            results = [result] if result else []
+                            if not results:
+                                st.warning(f"⚠️ No passport data found in image: {file.name}")
+                        
+                        for res in results:
+                            res['source_file'] = file.name
+                        all_results.extend(results)
+                        
+                    except Exception as e:
+                        st.error(f"❌ Error processing {file.name}: {str(e)}")
+                        import traceback
+                        st.error(f"Debug info: {traceback.format_exc()}")
+                        
+                    finally:
+                        # Safely remove temp file
+                        try:
+                            if os.path.exists(tmp_path):
+                                os.remove(tmp_path)
+                        except Exception as cleanup_error:
+                            st.warning(f"Warning: Could not clean up temp file: {cleanup_error}")
+                    
+                    # Update main progress bar - use container to avoid state issues
+                    with progress_container:
+                        main_progress_bar.progress((i + 1) / len(uploaded_files))
+
+                if not all_results:
+                    st.warning("No data could be extracted. Please check the files or try again.")
+                    st.session_state.processing = False
+                    return
+
+                # Format data based on airline selection
+                if airline == "Iraqi Airways":
+                    df = format_iraqi_airways(all_results)
+                elif airline == "Flydubai":
+                    df = format_flydubai(all_results)
+                else:
+                    df = pd.DataFrame(all_results)
+
+                st.dataframe(df)
                 
-                # Update main progress bar
-                main_progress_bar.progress((i + 1) / len(uploaded_files))
-
-            if not all_results:
-                st.warning("No data could be extracted. Please check the files or try again.")
-                return
-
-            # Format data based on airline selection
-            if airline == "Iraqi Airways":
-                df = format_iraqi_airways(all_results)
-            elif airline == "Flydubai":
-                df = format_flydubai(all_results)
-            else:
-                df = pd.DataFrame(all_results)
-
-            st.dataframe(df)
-            
-            # Download buttons
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                csv = df.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label="Download data as CSV",
-                    data=csv,
-                    file_name=f"passport_data_{airline.lower()}.csv",
-                    mime="text/csv",
-                )
-            
-            with col2:
-                # Create an in-memory Excel file
-                from io import BytesIO
-                output = BytesIO()
-                with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    df.to_excel(writer, index=False, sheet_name='PassportData')
+                # Reset processing state
+                st.session_state.processing = False
                 
-                st.download_button(
-                    label="Download data as Excel",
-                    data=output.getvalue(),
-                    file_name=f"passport_data_{airline.lower()}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                )
+                # Download buttons (only show if we have data)
+                if all_results:
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        csv = df.to_csv(index=False).encode('utf-8')
+                        st.download_button(
+                            label="Download data as CSV",
+                            data=csv,
+                            file_name=f"passport_data_{airline.lower()}.csv",
+                            mime="text/csv",
+                        )
+                    
+                    with col2:
+                        # Create an in-memory Excel file
+                        from io import BytesIO
+                        output = BytesIO()
+                        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                            df.to_excel(writer, index=False, sheet_name='PassportData')
+                        
+                        st.download_button(
+                            label="Download data as Excel",
+                            data=output.getvalue(),
+                            file_name=f"passport_data_{airline.lower()}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        )
+                
+            except Exception as e:
+                st.error(f"❌ Unexpected error during processing: {str(e)}")
+                import traceback
+                st.error(f"Debug info: {traceback.format_exc()}")
+                st.session_state.processing = False
+                
+            finally:
+                # Ensure processing state is reset even if an error occurs
+                if 'processing' in st.session_state:
+                    st.session_state.processing = False
 
 if __name__ == "__main__":
     main()
