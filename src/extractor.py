@@ -183,18 +183,23 @@ class PassportExtractor:
             # Ensure temp directory exists
             os.makedirs(TEMP_DIR, exist_ok=True)
             
-            # Convert PDF to images
-            images = convert_from_path(pdf_path)
-            logger.info(f"Converted PDF to {len(images)} pages")
+            # Convert PDF to images with error handling
+            try:
+                images = convert_from_path(pdf_path, dpi=300)  # Increased DPI for better quality
+                logger.info(f"Converted PDF to {len(images)} pages")
+            except Exception as e:
+                logger.error(f"Failed to convert PDF to images: {e}")
+                return []
+            
             results = []
             
             for i, image in enumerate(images):
-                # Save temporary image
-                temp_image_path = os.path.join(TEMP_DIR, f"temp_page_{i}.jpg")
-                image.save(temp_image_path, 'JPEG')
-                logger.info(f"Processing page {i+1}")
-                
                 try:
+                    # Save temporary image
+                    temp_image_path = os.path.join(TEMP_DIR, f"temp_page_{i}.jpg")
+                    image.save(temp_image_path, 'JPEG', quality=95)
+                    logger.info(f"Processing page {i+1}")
+                    
                     # Extract data from this page
                     result = self.get_data(temp_image_path)
                     if result:
@@ -203,6 +208,10 @@ class PassportExtractor:
                         logger.info(f"Successfully extracted data from page {i+1}")
                     else:
                         logger.warning(f"No data extracted from page {i+1}")
+                        
+                except Exception as e:
+                    logger.error(f"Error processing page {i+1}: {e}")
+                    continue
                 finally:
                     # Clean up temporary file
                     if os.path.exists(temp_image_path):
