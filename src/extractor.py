@@ -185,7 +185,7 @@ class PassportExtractor:
             
             # Convert PDF to images with error handling
             try:
-                images = convert_from_path(pdf_path, dpi=300)  # Increased DPI for better quality
+                images = convert_from_path(pdf_path, dpi=200)  # Increased DPI for better quality
                 logger.info(f"Converted PDF to {len(images)} pages")
             except Exception as e:
                 logger.error(f"Failed to convert PDF to images: {e}")
