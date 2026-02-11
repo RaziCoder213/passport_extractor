@@ -81,6 +81,9 @@ def clean_mrz_line(line: str) -> str:
     
     line = line.upper().replace(" ", "")
     
+    # Fix KKK+ in line to <<< (helps identifying separators for splitting)
+    line = re.sub(r'K{3,}', '<<<', line)
+    
     # Remove accidental characters except allowed
     allowed = set(st.ascii_uppercase + st.digits + "<")
     line = "".join([c for c in line if c in allowed])
