@@ -45,11 +45,11 @@ class FallbackMRZ:
                         names_part = parts[1].strip('<').strip() if len(parts) > 1 else ""
                         # Convert remaining < characters to spaces for proper name separation
                         self.names = names_part.replace('<', ' ').strip()
-                        print(f"Surname: '{self.surname}', Names: '{self.names}'")
+                        # Removed debug print
                     else:
                         self.surname = full_name.strip('<').strip()
                         self.names = ""
-                        print(f"Single name: '{self.surname}'")
+                        # Removed debug print
             
             # Parse line 2 for other information (be more flexible with length)
             if len(self.line2) >= 20:  # Minimum for basic info
@@ -70,9 +70,8 @@ class FallbackMRZ:
                 if len(self.line2) >= 42:
                     self.personal_number = self.line2[28:42].replace('<', '')
                 
-                print(f"Passport number: '{self.number}'")
-                print(f"Nationality: '{self.nationality}'")
-                print(f"Date of birth: '{self.date_of_birth}'")
-                print(f"Sex: '{self.sex}'")
+                # Removed debug prints for faster processing
+                pass
         except Exception as e:
-            print(f"Error parsing MRZ: {e}")
+            # Removed debug print - silently handle parsing errors
+            pass
