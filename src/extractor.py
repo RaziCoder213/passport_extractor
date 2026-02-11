@@ -158,15 +158,21 @@ class PassportExtractor:
             else:
                 gray = roi
 
-            # Strong bilateral filter (better than Gaussian for text)
-            denoised = cv2.bilateralFilter(gray, 9, 75, 75)
+            # Enhance contrast
+            alpha = 1.5  # Contrast control
+            beta = 10    # Brightness control
+            adjusted = cv2.convertScaleAbs(gray, alpha=alpha, beta=beta)
 
-            # Blackhat morphology to enhance dark text
-            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 5))
-            blackhat = cv2.morphologyEx(denoised, cv2.MORPH_BLACKHAT, kernel)
+            # Apply mild Gaussian blur to reduce noise
+            blurred = cv2.GaussianBlur(adjusted, (3,3), 0)
 
-            # Normalize contrast
-            norm = cv2.normalize(blackhat, None, 0, 255, cv2.NORM_MINMAX)
+            # Use adaptive threshold for better text extraction
+            binary = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                                          cv2.THRESH_BINARY, 11, 2)
+
+            # Clean up small noise
+            kernel = np.ones((2,2), np.uint8)
+            cleaned = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
 
             # Otsu threshold (better for MRZ than adaptive)
             _, thresh = cv2.threshold(norm, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
