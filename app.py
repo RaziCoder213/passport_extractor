@@ -122,9 +122,7 @@ def main():
     
     # Add a description
     st.markdown("""
-    This tool extracts data from passport MRZ (Machine-Readable Zone) codes. 
-    Upload passport images or PDFs, and the app will return a structured table of the extracted information. 
-    You can also select an airline-specific format for the output data.
+   Note: Please ensure that a clear and clean copy of the passport is used. Blurry images or dots/marks on the MRZ (Machine Readable Zone) may result in incorrect data extraction.
     """)
 
     # Sidebar Configuration
@@ -270,7 +268,7 @@ def main():
 
                 # Show results only after all processing is complete
                 successful_files = len(set(result.get('source_file', '') for result in all_results))
-                st.success(f"📋 Extracted data of {successful_files} files")
+                st.success(f"📋 Extracted data all files")
 
                 if not all_results:
                     st.warning("No data could be extracted. Please check the files or try again.")
