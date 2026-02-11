@@ -204,8 +204,8 @@ class PassportExtractor:
             # Look for given name field
             given_name = None
             for i, line in enumerate(text_lines):
-                # Look for "Given Name" or "Given Names" field
-                if 'GIVEN' in line and ('NAME' in line or 'NAMES' in line):
+                # Look for "Given Name" or "Given Names" field using regex for better matching
+                if re.search(r'GIVEN\s+NAME', line, re.IGNORECASE):
                     # Check if name is on the same line with colon separator
                     if ':' in line:
                         parts = line.split(':', 1)
@@ -224,27 +224,45 @@ class PassportExtractor:
                             # Name might be on next line
                             if i + 1 < len(text_lines):
                                 given_name = text_lines[i + 1]
-                    elif line.endswith('GIVEN NAME') or line.endswith('GIVEN NAMES'):
+                    elif re.search(r'GIVEN\s+NAME\s*$', line, re.IGNORECASE):
                         # Name might be on next line
                         if i + 1 < len(text_lines):
                             given_name = text_lines[i + 1]
                     else:
-                        # Try to extract from the same line
-                        try:
-                            parts = line.split('GIVEN')[1]  # Get text after "GIVEN"
-                            if 'NAME' in parts:
-                                given_name = parts.split('NAME')[1].strip()
-                            elif 'NAMES' in parts:
-                                given_name = parts.split('NAMES')[1].strip()
-                            else:
-                                # If no NAME/NAMES found, use everything after GIVEN
-                                given_name = parts.strip()
-                            
+                        # Try to extract from the same line using regex
+                        match = re.search(r'GIVEN\s+NAME\s*[:\-\s]*([A-Z\s]+)', line, re.IGNORECASE)
+                        if match:
+                            given_name = match.group(1).strip()
+                        else:
                             # If no name found after splitting, try next line
-                            if not given_name and i + 1 < len(text_lines):
+                            if i + 1 < len(text_lines):
                                 given_name = text_lines[i + 1]
-                        except IndexError:
-                            # If split fails, try next line
+                    break
+                # Also check for "FIRST NAME" field
+                elif re.search(r'FIRST\s+NAME', line, re.IGNORECASE):
+                    # Similar logic as above for FIRST NAME
+                    if ':' in line:
+                        parts = line.split(':', 1)
+                        if len(parts) > 1 and parts[1].strip():
+                            given_name = parts[1].strip()
+                        else:
+                            if i + 1 < len(text_lines):
+                                given_name = text_lines[i + 1]
+                    elif '-' in line:
+                        parts = line.split('-', 1)
+                        if len(parts) > 1 and parts[1].strip():
+                            given_name = parts[1].strip()
+                        else:
+                            if i + 1 < len(text_lines):
+                                given_name = text_lines[i + 1]
+                    elif re.search(r'FIRST\s+NAME\s*$', line, re.IGNORECASE):
+                        if i + 1 < len(text_lines):
+                            given_name = text_lines[i + 1]
+                    else:
+                        match = re.search(r'FIRST\s+NAME\s*[:\-\s]*([A-Z\s]+)', line, re.IGNORECASE)
+                        if match:
+                            given_name = match.group(1).strip()
+                        else:
                             if i + 1 < len(text_lines):
                                 given_name = text_lines[i + 1]
                     break
