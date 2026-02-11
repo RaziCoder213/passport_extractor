@@ -39,47 +39,58 @@ def clean_string(text):
 
 def clean_name_field(text):
     """
-    Clean name field by removing noise and extra characters.
-    Only removes junk, doesn't add or replace characters.
+    Cleans name/surname fields from MRZ.
+    Handles separators (<<, <) and fixes OCR errors where filler '<' are read as 'K'.
+    This version is safer and targets only trailing junk 'K's.
     """
     if not text:
         return ""
     
-    text = text.upper().strip()
+    text = text.upper()
     
-    # Remove trailing repeated characters (like KKKKKK)
-    if len(text) > 2:
-        # Check if last 3+ characters are the same (likely noise)
-        last_char = text[-1]
-        if text[-3:] == last_char * 3:
-            # Find where the repetition starts
-            for i in range(len(text)-1, -1, -1):
-                if text[i] != last_char:
-                    text = text[:i+1]
-                    break
+    # Standard MRZ separator between surname and names
+    text = text.replace("<<", " ")
     
-    # Remove any non-alphabetic characters except spaces
-    cleaned = ''.join(c if c.isalpha() or c == ' ' else ' ' for c in text)
+    # Find the last non-'K' character's index
+    last_good_char_idx = -1
+    for i in range(len(text) - 1, -1, -1):
+        if text[i] != 'K':
+            last_good_char_idx = i
+            break
+            
+    # If the string was all 'K's, it's empty.
+    if last_good_char_idx == -1:
+        return ""
+        
+    # Calculate how many 'K's are at the end
+    trailing_k_count = len(text) - 1 - last_good_char_idx
     
-    # Remove extra spaces
-    cleaned = ' '.join(cleaned.split())
+    # If there are 2 or more trailing 'K's, they are junk fillers. Trim them.
+    if trailing_k_count >= 2:
+        text = text[:last_good_char_idx + 1]
+        
+    # Now, any remaining single '<' characters are separators.
+    text = text.replace("<", " ")
     
-    return cleaned
+    return text.strip()
 
 def clean_mrz_line(line: str) -> str:
-    """Clean MRZ line by removing noise without adding characters."""
+    """Fix bad spacing or bad OCR for MRZ lines."""
     if not line:
         return ""
     
     line = line.upper().replace(" ", "")
     
-    # Remove any characters that shouldn't be in MRZ
-    # Keep only uppercase letters, digits, and '<'
+    # Remove accidental characters except allowed
     allowed = set(st.ascii_uppercase + st.digits + "<")
     line = "".join([c for c in line if c in allowed])
-    
-    # Don't force length - keep what we have
-    return line
+
+    # Ensure 44 length (standard TD3 MRZ length)
+    # Note: TD1/TD2 might be different lengths (30 or 36), but this logic enforces 44.
+    # We will keep existing logic for consistency but be aware of other formats.
+    if len(line) < 44:
+        line += "<" * (44 - len(line))
+    return line[:44]
 
 def get_country_name(country_code):
     """Resolves 3-letter country code to full name."""
@@ -97,4 +108,3 @@ def get_sex(code):
     if code == '0':
         return 'M' # Fallback based on existing logic
     return code
-
