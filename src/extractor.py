@@ -174,13 +174,6 @@ class PassportExtractor:
             kernel = np.ones((2,2), np.uint8)
             cleaned = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
 
-            # Otsu threshold (better for MRZ than adaptive)
-            _, thresh = cv2.threshold(norm, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-            # Remove small dots (opening)
-            small_kernel = np.ones((2,2), np.uint8)
-            cleaned = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, small_kernel)
-
             # Resize preserving ratio
             h, w = cleaned.shape
             scale = 140 / h
