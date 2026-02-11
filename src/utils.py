@@ -43,13 +43,13 @@ def clean_name_field(text):
 
     text = text.upper()
 
-    # First normalize all fake separators
+    # Normalize fake separators
     text = text.replace('K', '<').replace('X', '<').replace('C', '<')
 
-    # Split by MRZ separators
+    # Split using MRZ structure
     parts = text.split('<')
 
-    # Keep only pure alphabetic chunks
+    # Keep only alphabetic chunks
     parts = [p for p in parts if p.isalpha()]
 
     return " ".join(parts)
@@ -91,6 +91,7 @@ def get_sex(code):
     if code == '0':
         return 'M' # Fallback based on existing logic
     return code
+
 
 def correct_mrz_line1(line):
     """
