@@ -1,225 +1,168 @@
+import sys
 import os
-import cv2
-import numpy as np
-import easyocr
-import warnings
-import ssl
-import re
-from passporteye import read_mrz
-from pdf2image import convert_from_path
-import string as st
 
-from src.utils import (
-    clean_string,
-    clean_mrz_line,
-    parse_date,
-    get_country_name,
-    get_sex,
-    setup_logger,
-    clean_name_field
+# Ensure project root is in python path
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+import streamlit as st
+import tempfile
+import pandas as pd
+import time
+from src.extractor import PassportExtractor
+from src.validators import validate_passport_data
+from src.formats import format_iraqi_airways, format_flydubai
+
+# Set page configuration
+st.set_page_config(
+    page_title="Passport OCR Tool",
+    page_icon="🛂",
+    layout="wide"
 )
 
-from src.fallback_mrz import FallbackMRZ
-from config.settings import USE_GPU, OCR_LANGUAGES, TEMP_DIR
+# Initialize Extractor (cached to avoid reloading model)
+@st.cache_resource
+def get_extractor(use_gpu=False):
+    return PassportExtractor(use_gpu=use_gpu)
 
-warnings.filterwarnings("ignore")
-logger = setup_logger(__name__)
+def save_uploaded_file(uploaded_file):
+    """Save uploaded file to a temporary location and return the path."""
+    try:
+        suffix = os.path.splitext(uploaded_file.name)[1]
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
+            tmp_file.write(uploaded_file.getvalue())
+            return tmp_file.name
+    except Exception as e:
+        st.error(f"Error saving file: {e}")
+        return None
 
+def main():
+    st.title("🛂 Passport OCR Extractor")
+    
+    # Add a description
+    st.markdown("""
+    This tool extracts data from passport MRZ (Machine-Readable Zone) codes. 
+    Upload passport images or PDFs, and the app will return a structured table of the extracted information. 
+    You can also select an airline-specific format for the output data.
+    """)
 
-# Fix SSL issue (Mac EasyOCR model download fix)
-try:
-    _create_unverified_https_context = ssl._create_unverified_context
-except AttributeError:
-    pass
-else:
-    ssl._create_default_https_context = _create_unverified_https_context
+    # Sidebar Configuration
+    st.sidebar.header("Settings")
+    st.sidebar.info("💡 Running on Streamlit free tier - CPU only, max 10 MB per file")
+    use_gpu = st.sidebar.checkbox("Enable GPU Acceleration", value=False, disabled=True)  # Disabled for free tier
+    airline = st.sidebar.selectbox("Choose Airline Format", ["Default", "Iraqi Airways", "Flydubai"])
 
+    # File Uploader
+    uploaded_files = st.file_uploader(
+        "Upload Passport Files",
+        type=['png', 'jpg', 'jpeg', 'pdf', 'avif', 'webp', 'bmp', 'tiff'],
+        accept_multiple_files=True
+    )
 
-class PassportExtractor:
-
-    def __init__(self, use_gpu=USE_GPU, languages=None):
-        self.languages = languages if languages else OCR_LANGUAGES
-
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        model_dir = os.path.join(base_dir, "data", "models")
-        os.makedirs(model_dir, exist_ok=True)
-
-        logger.info(f"Initializing EasyOCR Reader (GPU={use_gpu})...")
-        self.reader = easyocr.Reader(
-            self.languages,
-            gpu=use_gpu,
-            model_storage_directory=model_dir
-        )
-        logger.info("EasyOCR initialized.")
-
-    # ---------------------------------------------------
-    # VISUAL GIVEN NAME EXTRACTION (PRIMARY SOURCE)
-    # ---------------------------------------------------
-    def extract_given_names_from_visual(self, img_path):
-        try:
-            results = self.reader.readtext(img_path, detail=0)
-            lines = [r.strip() for r in results if r.strip()]
-
-            for i, line in enumerate(lines):
-                upper_line = line.upper()
-
-                if "GIVEN" in upper_line and "NAME" in upper_line:
-
-                    if ":" in line:
-                        candidate = line.split(":")[1].strip()
-                    else:
-                        if i + 1 < len(lines):
-                            candidate = lines[i + 1].strip()
-                        else:
-                            return ""
-
-                    # Keep only letters and spaces
-                    candidate = re.sub(r'[^A-Za-z\s]', '', candidate)
-
-                    # Remove trailing single letter only if it's clearly an OCR artifact (not part of a name)
-                    # This is more conservative - only removes single letters that are likely OCR errors
-                    candidate = re.sub(r'([A-Z]{2,})[K]$', r'\1', candidate)  # K is common OCR error for <
-
-                    return candidate.strip()
-
-            return ""
-
-        except Exception as e:
-            logger.error(f"Given Names extraction failed: {e}")
-            return ""
-
-    # ---------------------------------------------------
-    # MRZ EXTRACTION
-    # ---------------------------------------------------
-    def extract_mrz_from_roi(self, img_path):
-        try:
-            mrz = read_mrz(img_path, save_roi=True)
-
-            if not mrz:
-                return None, None, None
-
-            roi = mrz.aux["roi"]
-
-            if roi.dtype != np.uint8:
-                roi = (roi * 255).astype(np.uint8)
-
-            img_resized = cv2.resize(roi, (1110, 140))
-            allow = st.ascii_uppercase + st.digits + "<"
-
-            code = self.reader.readtext(
-                img_resized,
-                detail=0,
-                allowlist=allow
-            )
-
-            if len(code) < 2:
-                return None, None, mrz
-
-            line1 = clean_mrz_line(code[0])
-            line2 = clean_mrz_line(code[1])
-
-            return line1, line2, mrz
-
-        except Exception as e:
-            logger.error(f"MRZ extraction failed: {e}")
-            return None, None, None
-
-    # ---------------------------------------------------
-    # MAIN DATA FUNCTION
-    # ---------------------------------------------------
-    def get_data(self, img_path):
-
-        if not os.path.exists(img_path):
-            logger.error(f"File not found: {img_path}")
-            return None
-
-        line1, line2, mrz = self.extract_mrz_from_roi(img_path)
-
-        if line1 and line2:
-            mrz = FallbackMRZ(line1, line2)
-
-        if mrz is None:
-            logger.warning("MRZ not detected.")
-            return None
-
-        surname = clean_name_field(getattr(mrz, "surname", ""))
-
-        # 🔥 ALWAYS prefer visual name
-        visual_name = self.extract_given_names_from_visual(img_path)
-
-        if visual_name:
-            name = visual_name
-        else:
-            name = clean_name_field(
-                getattr(mrz, "names", getattr(mrz, "name", ""))
-            )
-
-            # Final defensive cleanup - only remove trailing K which is a common OCR artifact
-            name = re.sub(r'([A-Z]{2,})[K]$', r'\1', name)
-
-        data = {
-            "surname": surname,
-            "name": name,
-            "country": get_country_name(getattr(mrz, "country", "")),
-            "nationality": get_country_name(getattr(mrz, "nationality", "")),
-            "passport_number": clean_string(getattr(mrz, "number", "")),
-            "sex": get_sex(getattr(mrz, "sex", "")),
-            "date_of_birth": parse_date(getattr(mrz, "date_of_birth", "")),
-            "expiration_date": parse_date(getattr(mrz, "expiration_date", "")),
-            "mrz_full_string": (line1 or "") + (line2 or ""),
-            "valid_score": getattr(mrz, "valid_score", 0),
-        }
-
-        return data
-
-    # ---------------------------------------------------
-    # PDF PROCESSING
-    # ---------------------------------------------------
-    def process_pdf(self, pdf_path):
-        """Process a PDF file and extract passport data from all pages."""
-        try:
-            logger.info(f"Processing PDF: {pdf_path}")
+    if uploaded_files:
+        if st.button("Extract Data"):
+            # Initialize extractor inside the button click to use the latest settings
+            extractor = PassportExtractor(use_gpu=use_gpu)
             
-            # Ensure temp directory exists
-            os.makedirs(TEMP_DIR, exist_ok=True)
+            all_results = []
+            main_progress_bar = st.progress(0)
             
-            # Convert PDF to images with error handling
-            try:
-                images = convert_from_path(pdf_path, dpi=200)  # Increased DPI for better quality
-                logger.info(f"Converted PDF to {len(images)} pages")
-            except Exception as e:
-                logger.error(f"Failed to convert PDF to images: {e}")
-                return []
-            
-            results = []
-            
-            for i, image in enumerate(images):
-                try:
-                    # Save temporary image
-                    temp_image_path = os.path.join(TEMP_DIR, f"temp_page_{i}.jpg")
-                    image.save(temp_image_path, 'JPEG', quality=95)
-                    logger.info(f"Processing page {i+1}")
-                    
-                    # Extract data from this page
-                    result = self.get_data(temp_image_path)
-                    if result:
-                        result['page_number'] = i + 1
-                        results.append(result)
-                        logger.info(f"Successfully extracted data from page {i+1}")
-                    else:
-                        logger.warning(f"No data extracted from page {i+1}")
-                        
-                except Exception as e:
-                    logger.error(f"Error processing page {i+1}: {e}")
+            for i, file in enumerate(uploaded_files):
+                st.write(f"Processing file {i+1} of {len(uploaded_files)}: {file.name}")
+                
+                # Check file size for Streamlit free tier
+                file_size = len(file.getvalue())
+                if file_size > 10 * 1024 * 1024:  # 10 MB
+                    st.error(f"❌ File too large: {file.name} ({file_size / (1024*1024):.1f} MB). Max 10 MB allowed.")
+                    main_progress_bar.progress((i + 1) / len(uploaded_files))
                     continue
+                
+                with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.name)[1]) as tmp:
+                    tmp.write(file.getvalue())
+                    tmp_path = tmp.name
+                
+                # Create a progress container for PDF processing
+                pdf_progress_container = st.empty()
+                
+                try:
+                    # Check both MIME type and file extension for PDF detection
+                    is_pdf = file.type == "application/pdf" or file.name.lower().endswith('.pdf')
+                    
+                    if is_pdf:
+                        st.write(f"📄 Processing as PDF: {file.name} (type: {file.type})")
+                        
+                        # Progress callback for PDF processing
+                        def update_pdf_progress(progress):
+                            pdf_progress_container.progress(progress)
+                        
+                        try:
+                            results = extractor.process_pdf(tmp_path, progress_callback=update_pdf_progress)
+                            if not results:
+                                st.warning(f"⚠️ No passport data found in PDF: {file.name}")
+                        except Exception as e:
+                            st.error(f"❌ PDF processing failed for {file.name}: {str(e)}")
+                            results = []
+                        finally:
+                            pdf_progress_container.empty()  # Clear the progress bar
+                            
+                    else:
+                        st.write(f"🖼️ Processing as image: {file.name} (type: {file.type})")
+                        result = extractor.get_data(tmp_path)
+                        results = [result] if result else []
+                        if not results:
+                            st.warning(f"⚠️ No passport data found in image: {file.name}")
+                    
+                    for res in results:
+                        res['source_file'] = file.name
+                    all_results.extend(results)
+                    
+                except Exception as e:
+                    st.error(f"❌ Error processing {file.name}: {str(e)}")
+                    
                 finally:
-                    # Clean up temporary file
-                    if os.path.exists(temp_image_path):
-                        os.remove(temp_image_path)
+                    os.remove(tmp_path)
+                
+                # Update main progress bar
+                main_progress_bar.progress((i + 1) / len(uploaded_files))
+
+            if not all_results:
+                st.warning("No data could be extracted. Please check the files or try again.")
+                return
+
+            # Format data based on airline selection
+            if airline == "Iraqi Airways":
+                df = format_iraqi_airways(all_results)
+            elif airline == "Flydubai":
+                df = format_flydubai(all_results)
+            else:
+                df = pd.DataFrame(all_results)
+
+            st.dataframe(df)
             
-            logger.info(f"PDF processing complete. Found {len(results)} valid pages")
-            return results
+            # Download buttons
+            col1, col2 = st.columns(2)
             
-        except Exception as e:
-            logger.error(f"PDF processing failed for {pdf_path}: {e}")
-            return []
+            with col1:
+                csv = df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="Download data as CSV",
+                    data=csv,
+                    file_name=f"passport_data_{airline.lower()}.csv",
+                    mime="text/csv",
+                )
+            
+            with col2:
+                # Create an in-memory Excel file
+                from io import BytesIO
+                output = BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    df.to_excel(writer, index=False, sheet_name='PassportData')
+                
+                st.download_button(
+                    label="Download data as Excel",
+                    data=output.getvalue(),
+                    file_name=f"passport_data_{airline.lower()}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+
+if __name__ == "__main__":
+    main()
