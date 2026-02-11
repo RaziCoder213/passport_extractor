@@ -258,11 +258,15 @@ class PassportExtractor:
                 given_name = re.sub(r'^(SURNAME|FAMILY NAME|LAST NAME|FIRST NAME)\s*[:\-]?\s*', '', given_name, flags=re.IGNORECASE)
                 # Remove any trailing field labels
                 given_name = re.sub(r'\s+(SURNAME|FAMILY NAME|LAST NAME|FIRST NAME|DATE|PLACE|NATIONALITY|SEX|PASSPORT)$', '', given_name, flags=re.IGNORECASE)
-                # Remove any trailing single letters that are likely OCR artifacts (not part of normal names)
-                # This handles cases where OCR picks up stray characters
-                if len(given_name) > 2 and given_name[-1].isupper() and given_name[-2] == ' ':
-                    # Only remove if it's a single uppercase letter at the end
-                    given_name = re.sub(r' [A-Z]$', '', given_name)
+                
+                # Handle OCR artifacts - remove trailing single letters
+                # Case 1: Single uppercase letter at the end (like "SYEDIBRAHEEMK")
+                if len(given_name) > 1 and given_name[-1].isupper() and not given_name[-2].isspace():
+                    # Only remove if the last character is a single uppercase letter not preceded by space
+                    given_name = given_name[:-1]
+                # Case 2: Single uppercase letter separated by space (like "SYED IBRAHEEM K")
+                elif len(given_name) > 2 and given_name[-1].isupper() and given_name[-2] == ' ':
+                    given_name = given_name[:-2].rstrip()
                 
                 # If the name is too long or contains unusual characters, it might be a false positive
                 if len(given_name) > 50 or any(char.isdigit() for char in given_name):
@@ -424,4 +428,3 @@ class PassportExtractor:
                 os.remove(temp_img_path)
 
         return extracted_data
-
