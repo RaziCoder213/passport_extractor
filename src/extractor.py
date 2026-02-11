@@ -266,6 +266,74 @@ class PassportExtractor:
         
         return name.strip()
 
+    def detect_text_regions(self, img):
+        """
+        Detect text regions in passport image using EAST text detector
+        """
+        try:
+            # Load EAST text detector model (you'll need to download frozen_east_text_detection.pb)
+            # For now, we'll use a simpler approach with contour detection
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            
+            # Apply morphological operations to enhance text regions
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 3))
+            morph = cv2.morphologyEx(gray, cv2.MORPH_TOPHAT, kernel)
+            
+            # Apply threshold
+            _, thresh = cv2.threshold(morph, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            
+            # Find contours
+            contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            regions = []
+            for contour in contours:
+                x, y, w, h = cv2.boundingRect(contour)
+                
+                # Filter by aspect ratio and size (text regions are typically wide and short)
+                if w > 50 and h > 10 and w/h > 2:
+                    regions.append((x, y, w, h))
+            
+            return regions
+        except Exception as e:
+            logger.warning(f"Text region detection failed: {e}")
+            return []
+    
+    def extract_name_region(self, img, regions):
+        """
+        Extract the name region from detected text regions
+        """
+        try:
+            # Sort regions by y-coordinate (top to bottom)
+            regions.sort(key=lambda r: r[1])
+            
+            # Look for regions that might contain name fields
+            name_regions = []
+            for i, (x, y, w, h) in enumerate(regions):
+                # Look for regions in the upper part of passport (where names typically are)
+                if y < img.shape[0] // 3:
+                    name_regions.append((x, y, w, h))
+            
+            if name_regions:
+                # Take the first few regions as potential name areas
+                x_min = min(r[0] for r in name_regions)
+                y_min = min(r[1] for r in name_regions)
+                x_max = max(r[0] + r[2] for r in name_regions)
+                y_max = max(r[1] + r[3] for r in name_regions)
+                
+                # Add some padding
+                padding = 20
+                x_min = max(0, x_min - padding)
+                y_min = max(0, y_min - padding)
+                x_max = min(img.shape[1], x_max + padding)
+                y_max = min(img.shape[0], y_max + padding)
+                
+                return img[y_min:y_max, x_min:x_max]
+            
+            return None
+        except Exception as e:
+            logger.warning(f"Name region extraction failed: {e}")
+            return None
+
     def extract_given_name_from_visual_zone(self, img_path):
         """
         Extracts the given name from the visual inspection zone of the passport
