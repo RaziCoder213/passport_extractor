@@ -47,6 +47,49 @@ class PassportExtractor:
         self.reader = easyocr.Reader(self.languages, gpu=use_gpu, model_storage_directory=model_dir)
         logger.info("EasyOCR Reader initialized.")
 
+    def clean_image_for_ocr(self, image):
+        """
+        Comprehensive image cleaning for better OCR results.
+        """
+        try:
+            # Convert to grayscale if needed
+            if len(image.shape) == 3:
+                gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            else:
+                gray = image.copy()
+            
+            # Apply CLAHE (Contrast Limited Adaptive Histogram Equalization)
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+            enhanced = clahe.apply(gray)
+            
+            # Apply bilateral filter to reduce noise while keeping edges sharp
+            denoised = cv2.bilateralFilter(enhanced, 9, 75, 75)
+            
+            # Apply sharpening kernel
+            kernel = np.array([[-1,-1,-1],
+                              [-1, 9,-1],
+                              [-1,-1,-1]])
+            sharpened = cv2.filter2D(denoised, -1, kernel)
+            
+            # Apply adaptive threshold
+            binary = cv2.adaptiveThreshold(sharpened, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                                          cv2.THRESH_BINARY, 11, 2)
+            
+            # Morphological operations to clean up
+            kernel = np.ones((2,2), np.uint8)
+            cleaned = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+            cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_OPEN, kernel)
+            
+            return cleaned
+            
+        except Exception as e:
+            logger.error(f"Error in clean_image_for_ocr: {e}")
+            # Fallback to simple grayscale conversion
+            if len(image.shape) == 3:
+                return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            else:
+                return image
+
     def _retry_with_rotation(self, img_path):
         """Try rotating image 90, 180, 270 degrees to find MRZ."""
         try:
@@ -117,311 +160,3 @@ class PassportExtractor:
         except Exception as e:
             logger.error(f"Direct EasyOCR fallback failed: {e}")
             return None, None, None
-
-    def extract_mrz_from_roi(self, img_path):
-        """
-        Extracts MRZ lines using PassportEye to find ROI, then EasyOCR to read text.
-        Returns (line1, line2, mrz_object).
-        """
-        try:
-            # Analyze image with PassportEye
-            mrz = read_mrz(img_path, save_roi=True)
-            
-            if not mrz:
-                logger.warning(f"PassportEye failed to detect MRZ in {img_path}. Trying rotations...")
-                # Try rotating 90, 180, 270
-                mrz = self._retry_with_rotation(img_path)
-            
-            if not mrz:
-                logger.warning(f"PassportEye failed to detect MRZ in {img_path} after rotations.")
-                # Fallback 2: Direct EasyOCR on the full image
-                logger.info("Attempting Direct EasyOCR fallback on full image...")
-                return self._fallback_direct_easyocr(img_path)
-
-            # Get ROI (Region of Interest)
-            roi = mrz.aux['roi']
-            
-            # Manually crop bottom 30% if PassportEye ROI includes extra space above MRZ
-            h, w = roi.shape[:2]
-            roi = roi[int(h * 0.6):h, :]
-
-            # Ensure ROI is uint8 for OpenCV
-            if roi.dtype != np.uint8:
-                if roi.max() <= 1.0:
-                    roi = (roi * 255).astype(np.uint8)
-                else:
-                    roi = roi.astype(np.uint8)
-
-            # Convert to grayscale
-            if len(roi.shape) == 3:
-                gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-            else:
-                gray = roi
-
-            # Enhance contrast
-            alpha = 1.5  # Contrast control
-            beta = 10    # Brightness control
-            adjusted = cv2.convertScaleAbs(gray, alpha=alpha, beta=beta)
-
-            # Apply mild Gaussian blur to reduce noise
-            blurred = cv2.GaussianBlur(adjusted, (3,3), 0)
-
-            # Use adaptive threshold for better text extraction
-            binary = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                                          cv2.THRESH_BINARY, 11, 2)
-
-            # Clean up small noise
-            kernel = np.ones((2,2), np.uint8)
-            cleaned = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
-
-            # Resize preserving ratio
-            h, w = cleaned.shape
-            scale = 140 / h
-            new_w = int(w * scale)
-            img_resized = cv2.resize(cleaned, (new_w, 140))
-            
-            # Define allowed characters for MRZ
-            allow = st.ascii_uppercase + st.digits + "<"
-            
-            # Run EasyOCR with stricter parameters
-            code = self.reader.readtext(
-                img_resized,
-                detail=0,
-                allowlist=allow,
-                paragraph=False,
-                width_ths=0.5,
-                height_ths=0.5
-            )
-
-            if len(code) < 2:
-                logger.warning(f"EasyOCR found fewer than 2 lines in ROI for {img_path}")
-                return None, None, mrz
-
-            line1 = clean_mrz_line(code[0])
-            line2 = clean_mrz_line(code[1])
-            
-            logger.info(f"Extracted MRZ lines: Line1='{line1}', Line2='{line2}'")
-
-            # Correct sex at index 20 of line 2 if available from mrz object
-
-            # Correct sex at index 20 of line 2 if available from mrz object
-            # MRZ object might have parsed it correctly even if EasyOCR missed it
-            if mrz.sex and len(line2) > 20:
-                l2_list = list(line2)
-                l2_list[20] = mrz.sex
-                line2 = "".join(l2_list)
-
-            return line1, line2, mrz
-
-        except Exception as e:
-            logger.error(f"Error in extract_mrz_from_roi: {e}")
-            return None, None, None
-
-    def extract_name_from_visual_zone(self, img_path):
-        """
-        Extract name from the visual zone of the passport (non-MRZ area).
-        This is used as a fallback when MRZ parsing fails.
-        """
-        try:
-            # Read the image
-            image = cv2.imread(img_path)
-            if image is None:
-                return "", ""
-            
-            # Convert to grayscale
-            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-            
-            # Enhance image for text extraction
-            # Apply contrast enhancement
-            alpha = 1.2
-            beta = 10
-            enhanced = cv2.convertScaleAbs(gray, alpha=alpha, beta=beta)
-            
-            # Apply threshold to get binary image
-            _, binary = cv2.threshold(enhanced, 127, 255, cv2.THRESH_BINARY_INV)
-            
-            # Use EasyOCR to read text from the upper portion of the passport
-            # where names are typically located
-            h, w = binary.shape
-            # Focus on top half of the passport for name extraction
-            name_region = binary[0:h//2, 0:w]
-            
-            # Save temporary image for OCR
-            temp_path = img_path + "_name_temp.png"
-            cv2.imwrite(temp_path, name_region)
-            
-            # Read text from the name region
-            result = self.reader.readtext(temp_path, detail=0)
-            
-            # Clean up temp file
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-            
-            # Look for potential name patterns
-            potential_names = []
-            for text in result:
-                # Clean the text
-                cleaned = clean_name_field(text)
-                if cleaned and len(cleaned) > 2:  # Minimum length for a name
-                    potential_names.append(cleaned)
-            
-            # Return the first two reasonable names found
-            if len(potential_names) >= 2:
-                return potential_names[0], potential_names[1]  # surname, given name
-            elif len(potential_names) == 1:
-                return potential_names[0], ""  # surname only
-            else:
-                return "", ""
-                
-        except Exception as e:
-            logger.error(f"Error extracting name from visual zone: {e}")
-            return "", ""
-
-    def get_data(self, img_path, airline=None):
-        """
-        Extracts full passport data from an image file.
-        Returns a dictionary of extracted fields.
-        """
-        if not os.path.exists(img_path):
-            logger.error(f"File not found: {img_path}")
-            return None
-
-        line1, line2, mrz = self.extract_mrz_from_roi(img_path)
-
-        # Store the raw MRZ lines for display
-        raw_mrz_string = ""
-        if line1 and line2:
-            raw_mrz_string = line1 + "\n" + line2
-
-        # If we have clean lines from EasyOCR, use them to create a new MRZ object
-        # to ensure data consistency, overriding any potentially faulty data from passporteye
-        if line1 and line2:
-            try:
-                mrz = FallbackMRZ(line1, line2)
-            except Exception as e:
-                logger.warning(f"FallbackMRZ failed: {e}, using raw lines")
-
-        if mrz is None:
-            logger.warning(f"Could not extract a valid MRZ from {img_path}")
-            
-            # Try to extract names from visual zone
-            logger.info("Trying to extract name from visual zone")
-            visual_surname, visual_name = self.extract_name_from_visual_zone(img_path)
-            
-            # Still return data with raw MRZ string even if parsing failed
-            return {
-                "surname": visual_surname,
-                "name": visual_name,
-                "country": "",
-                "nationality": "",
-                "passport_number": "",
-                "sex": "",
-                "date_of_birth": "",
-                "expiration_date": "",
-                "mrz_full_string": raw_mrz_string,
-                "valid_score": 0,
-            }
-        
-        # Safely get data from MRZ object
-        # FallbackMRZ has 'names', passporteye has 'name'. Let's check for both.
-        surname = clean_name_field(getattr(mrz, 'surname', ''))
-        name = clean_name_field(getattr(mrz, 'names', getattr(mrz, 'name', '')))
-        
-        # If names are empty, try to extract from raw MRZ line 1
-        if not surname and line1:
-            try:
-                # MRZ line 1 format: P<CCCSURNAME<<NAMES<<<<<<<<<<<<<<<<<<<<<<
-                name_part = line1[5:] if len(line1) > 5 else ""
-                if '<<' in name_part:
-                    parts = name_part.split('<<', 1)
-                    raw_surname = parts[0].replace('<', ' ').strip()
-                    raw_names = parts[1].replace('<', ' ').strip() if len(parts) > 1 else ""
-                    surname = clean_name_field(raw_surname)
-                    name = clean_name_field(raw_names)
-                    print(f"Extracted from raw MRZ: surname='{surname}', name='{name}'")
-                else:
-                    raw_surname = name_part.replace('<', ' ').strip()
-                    surname = clean_name_field(raw_surname)
-                    print(f"Extracted single name from raw MRZ: surname='{surname}'")
-            except Exception as e:
-                print(f"Error extracting from raw MRZ: {e}")
-        
-        # If names are still empty, try to extract from visual zone
-        if not surname and not name:
-            logger.info("Trying to extract name from visual zone")
-            visual_surname, visual_name = self.extract_name_from_visual_zone(img_path)
-            if visual_surname or visual_name:
-                surname = visual_surname
-                name = visual_name
-                logger.info(f"Extracted from visual zone: surname='{surname}', name='{name}'")
-
-        data = {
-            "surname": surname,
-            "name": name,
-            "country": get_country_name(getattr(mrz, 'country', '')),
-            "nationality": get_country_name(getattr(mrz, 'nationality', '')),
-            "passport_number": clean_string(getattr(mrz, 'number', '')),
-            "sex": get_sex(getattr(mrz, 'sex', '')),
-            "date_of_birth": parse_date(getattr(mrz, 'date_of_birth', '')),
-            "expiration_date": parse_date(getattr(mrz, 'expiration_date', '')),
-            "mrz_full_string": raw_mrz_string or ((line1 or "") + "\n" + (line2 or "")),
-            "valid_score": getattr(mrz, 'valid_score', 0),
-        }
-        return data
-
-
-
-    def process_pdf(self, pdf_path):
-        """
-        Converts PDF pages to images and extracts data from each.
-        Returns a list of data dictionaries.
-        """
-        extracted_data = []
-        
-        # Ensure temp dir exists
-        os.makedirs(TEMP_DIR, exist_ok=True)
-        
-        logger.info(f"Processing PDF: {pdf_path}")
-        try:
-            pages = convert_from_path(pdf_path)
-        except Exception as e:
-            try:
-                import fitz
-                doc = fitz.open(pdf_path)
-                pages = []
-                for i in range(len(doc)):
-                    page = doc.load_page(i)
-                    pix = page.get_pixmap(dpi=200)
-                    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-                    pages.append(img)
-                doc.close()
-            except Exception as e2:
-                logger.error(f"Failed to convert PDF {pdf_path}: {e2}")
-                return []
-
-        for i, page in enumerate(pages):
-            temp_img_path = os.path.join(TEMP_DIR, f"temp_page_{i+1}.png")
-            page.save(temp_img_path, "PNG")
-            
-            logger.info(f"Processing page {i+1}...")
-            result = self.get_data(temp_img_path)
-            
-            # Special MRZ fix for PDF from original code
-            # It seems to re-clean the combined string.
-            if result and result.get("mrz_full_string"):
-                full_mrz = result["mrz_full_string"]
-                if len(full_mrz) >= 88: # 44 * 2
-                    l1 = full_mrz[:44]
-                    l2 = full_mrz[44:]
-                    l1 = clean_mrz_line(l1)
-                    l2 = clean_mrz_line(l2)
-                    result["mrz_full_string"] = l1 + l2
-            
-            if result:
-                extracted_data.append(result)
-            
-            # Cleanup temp file
-            if os.path.exists(temp_img_path):
-                os.remove(temp_img_path)
-
-        return extracted_data
