@@ -49,32 +49,7 @@ class PassportExtractor:
             model_storage_directory=model_dir
         )
         logger.info("EasyOCR initialized.")
-
-    # ---------------------------------------------------
-    # 🔥 EXTRACT GIVEN NAMES FROM VISUAL FIELD
-    # ---------------------------------------------------
-    Good. That tells me exactly what is happening.
-
-Your OCR is reading:
-
-SYED IBRAHEEMK
-
-
-The extra “K” is not from MRZ.
-It is coming from OCR noise — usually from:
-
-Next field bleeding (like country code PK)
-
-The word “PAKISTAN”
-
-Or background edge touching the name
-
-So we must clean the extracted name properly, not just return raw OCR text.
-
-✅ Proper Fix (Remove trailing garbage letters safely)
-
-Replace your extract_given_names_from_visual() with this cleaned version:
-
+        
 import re
 
 def extract_given_names_from_visual(self, img_path):
@@ -125,9 +100,6 @@ def extract_given_names_from_visual(self, img_path):
         logger.error(f"Given Names extraction failed: {e}")
         return ""
 
-        except Exception as e:
-            logger.error(f"Given Names extraction failed: {e}")
-            return ""
 
     # ---------------------------------------------------
     # MRZ EXTRACTION
