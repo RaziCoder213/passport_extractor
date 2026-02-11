@@ -48,27 +48,28 @@ def clean_name_field(text):
     
     text = text.upper()
     
-    # 1. Aggressively fix blocks of Ks that are likely corrupted fillers
-    # e.g. "FATIMAKKKKKK" -> "FATIMA<<<<<<"
-    # We assume valid names don't have 3+ Ks in a row.
-    text = re.sub(r'K{3,}', '<<<', text)
-    
-    # 2. Standard MRZ separator between surname and names
+    # Standard MRZ separator between surname and names
     text = text.replace("<<", " ")
     
-    # 3. Handle trailing garbage (mix of K and <)
-    # Remove trailing sequence of [K<] if it looks like filler.
-    # Condition: Sequence length >= 2 (e.g. KK) OR contains '<' (e.g. <K)
-    # Single 'K' at end (e.g. DEREK) is preserved.
-    def replace_trailing(match):
-        s = match.group(0)
-        if len(s) >= 2 or '<' in s:
-            return ""
-        return s
+    # Find the last non-'K' character's index
+    last_good_char_idx = -1
+    for i in range(len(text) - 1, -1, -1):
+        if text[i] != 'K':
+            last_good_char_idx = i
+            break
+            
+    # If the string was all 'K's, it's empty.
+    if last_good_char_idx == -1:
+        return ""
         
-    text = re.sub(r'[K<]+$', replace_trailing, text)
+    # Calculate how many 'K's are at the end
+    trailing_k_count = len(text) - 1 - last_good_char_idx
+    
+    # If there are 2 or more trailing 'K's, they are junk fillers. Trim them.
+    if trailing_k_count >= 2:
+        text = text[:last_good_char_idx + 1]
         
-    # 4. Now, any remaining single '<' characters are separators between names.
+    # Now, any remaining single '<' characters are separators.
     text = text.replace("<", " ")
     
     return text.strip()
@@ -79,9 +80,6 @@ def clean_mrz_line(line: str) -> str:
         return ""
     
     line = line.upper().replace(" ", "")
-    
-    # Fix KKK+ in line to <<< (helps identifying separators for splitting)
-    line = re.sub(r'K{3,}', '<<<', line)
     
     # Remove accidental characters except allowed
     allowed = set(st.ascii_uppercase + st.digits + "<")
