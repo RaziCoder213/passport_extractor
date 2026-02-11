@@ -1,4 +1,3 @@
-
 import os
 import cv2
 import numpy as np
@@ -77,8 +76,9 @@ class PassportExtractor:
                     # Keep only letters and spaces
                     candidate = re.sub(r'[^A-Za-z\s]', '', candidate)
 
-                    # Remove trailing single letter (e.g. IBRAHEEMK → IBRAHEEM)
-                    candidate = re.sub(r'([A-Z]{3,})[A-Z]$', r'\1', candidate)
+                    # Remove trailing single letter only if it's clearly an OCR artifact (not part of a name)
+                    # This is more conservative - only removes single letters that are likely OCR errors
+                    candidate = re.sub(r'([A-Z]{2,})[K]$', r'\1', candidate)  # K is common OCR error for <
 
                     return candidate.strip()
 
@@ -154,8 +154,8 @@ class PassportExtractor:
                 getattr(mrz, "names", getattr(mrz, "name", ""))
             )
 
-            # Final defensive cleanup
-            name = re.sub(r'([A-Z]{3,})[A-Z]$', r'\1', name)
+            # Final defensive cleanup - only remove trailing K which is a common OCR artifact
+            name = re.sub(r'([A-Z]{2,})[K]$', r'\1', name)
 
         data = {
             "surname": surname,
@@ -171,3 +171,46 @@ class PassportExtractor:
         }
 
         return data
+
+    # ---------------------------------------------------
+    # PDF PROCESSING
+    # ---------------------------------------------------
+    def process_pdf(self, pdf_path):
+        """Process a PDF file and extract passport data from all pages."""
+        try:
+            logger.info(f"Processing PDF: {pdf_path}")
+            
+            # Ensure temp directory exists
+            os.makedirs(TEMP_DIR, exist_ok=True)
+            
+            # Convert PDF to images
+            images = convert_from_path(pdf_path)
+            logger.info(f"Converted PDF to {len(images)} pages")
+            results = []
+            
+            for i, image in enumerate(images):
+                # Save temporary image
+                temp_image_path = os.path.join(TEMP_DIR, f"temp_page_{i}.jpg")
+                image.save(temp_image_path, 'JPEG')
+                logger.info(f"Processing page {i+1}")
+                
+                try:
+                    # Extract data from this page
+                    result = self.get_data(temp_image_path)
+                    if result:
+                        result['page_number'] = i + 1
+                        results.append(result)
+                        logger.info(f"Successfully extracted data from page {i+1}")
+                    else:
+                        logger.warning(f"No data extracted from page {i+1}")
+                finally:
+                    # Clean up temporary file
+                    if os.path.exists(temp_image_path):
+                        os.remove(temp_image_path)
+            
+            logger.info(f"PDF processing complete. Found {len(results)} valid pages")
+            return results
+            
+        except Exception as e:
+            logger.error(f"PDF processing failed for {pdf_path}: {e}")
+            return []
