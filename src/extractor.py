@@ -7,16 +7,7 @@ import ssl
 import re
 from passporteye import read_mrz
 from pdf2image import convert_from_path
-from PIL import Image
 import string as st
-
-# Fix SSL issue
-try:
-    _create_unverified_https_context = ssl._create_unverified_context
-except AttributeError:
-    pass
-else:
-    ssl._create_default_https_context = _create_unverified_https_context
 
 from src.utils import (
     clean_string,
@@ -33,6 +24,15 @@ from config.settings import USE_GPU, OCR_LANGUAGES, TEMP_DIR
 
 warnings.filterwarnings("ignore")
 logger = setup_logger(__name__)
+
+
+# Fix SSL issue (Mac EasyOCR model download fix)
+try:
+    _create_unverified_https_context = ssl._create_unverified_context
+except AttributeError:
+    pass
+else:
+    ssl._create_default_https_context = _create_unverified_https_context
 
 
 class PassportExtractor:
@@ -53,34 +53,11 @@ class PassportExtractor:
         logger.info("EasyOCR initialized.")
 
     # ---------------------------------------------------
-    # 🔥 REGION-BASED GIVEN NAME EXTRACTION (FIXED)
+    # VISUAL GIVEN NAME EXTRACTION (PRIMARY SOURCE)
     # ---------------------------------------------------
     def extract_given_names_from_visual(self, img_path):
-
         try:
-            image = cv2.imread(img_path)
-
-            if image is None:
-                return ""
-
-            h, w, _ = image.shape
-
-            # -------------------------------
-            # CROP REGION FOR PAK PASSPORT
-            # -------------------------------
-            # Adjusted for NADRA layout
-            crop = image[int(h*0.28):int(h*0.50),
-                         int(w*0.20):int(w*0.80)]
-
-            # Convert to grayscale
-            gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-
-            # Improve OCR clarity
-            gray = cv2.GaussianBlur(gray, (3, 3), 0)
-            _, thresh = cv2.threshold(gray, 0, 255,
-                                       cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-            results = self.reader.readtext(thresh, detail=0)
+            results = self.reader.readtext(img_path, detail=0)
             lines = [r.strip() for r in results if r.strip()]
 
             for i, line in enumerate(lines):
@@ -88,24 +65,21 @@ class PassportExtractor:
 
                 if "GIVEN" in upper_line and "NAME" in upper_line:
 
-                    if i + 1 < len(lines):
-                        candidate = lines[i + 1].strip()
+                    if ":" in line:
+                        candidate = line.split(":")[1].strip()
                     else:
-                        return ""
+                        if i + 1 < len(lines):
+                            candidate = lines[i + 1].strip()
+                        else:
+                            return ""
 
-                    # --------------------------
-                    # CLEAN NAME PROPERLY
-                    # --------------------------
+                    # Keep only letters and spaces
                     candidate = re.sub(r'[^A-Za-z\s]', '', candidate)
-                    candidate = candidate.strip()
 
-                    # REMOVE TRAILING BLEED CHARACTER
-                    if candidate.isupper() and len(candidate) > 5:
-                        candidate = candidate[:-1]
+                    # Remove trailing single letter (e.g. IBRAHEEMK → IBRAHEEM)
+                    candidate = re.sub(r'([A-Z]{3,})[A-Z]$', r'\1', candidate)
 
-                    candidate = " ".join(candidate.split())
-
-                    return candidate
+                    return candidate.strip()
 
             return ""
 
@@ -117,7 +91,6 @@ class PassportExtractor:
     # MRZ EXTRACTION
     # ---------------------------------------------------
     def extract_mrz_from_roi(self, img_path):
-
         try:
             mrz = read_mrz(img_path, save_roi=True)
 
@@ -151,7 +124,7 @@ class PassportExtractor:
             return None, None, None
 
     # ---------------------------------------------------
-    # MAIN FUNCTION
+    # MAIN DATA FUNCTION
     # ---------------------------------------------------
     def get_data(self, img_path):
 
@@ -170,14 +143,18 @@ class PassportExtractor:
 
         surname = clean_name_field(getattr(mrz, "surname", ""))
 
+        # 🔥 ALWAYS prefer visual name
         visual_name = self.extract_given_names_from_visual(img_path)
 
         if visual_name:
-            name = clean_name_field(visual_name)
+            name = visual_name
         else:
             name = clean_name_field(
                 getattr(mrz, "names", getattr(mrz, "name", ""))
             )
+
+            # Final defensive cleanup
+            name = re.sub(r'([A-Z]{3,})[A-Z]$', r'\1', name)
 
         data = {
             "surname": surname,
@@ -193,34 +170,3 @@ class PassportExtractor:
         }
 
         return data
-
-    # ---------------------------------------------------
-    # PDF SUPPORT
-    # ---------------------------------------------------
-    def process_pdf(self, pdf_path):
-
-        extracted_data = []
-        os.makedirs(TEMP_DIR, exist_ok=True)
-
-        try:
-            pages = convert_from_path(pdf_path, dpi=300)
-        except Exception as e:
-            logger.error(f"PDF conversion failed: {e}")
-            return []
-
-        for i, page in enumerate(pages):
-            temp_img_path = os.path.join(
-                TEMP_DIR, f"temp_page_{i+1}.png"
-            )
-            page.save(temp_img_path, "PNG")
-
-            result = self.get_data(temp_img_path)
-
-            if result:
-                result["source_page"] = i + 1
-                extracted_data.append(result)
-
-            if os.path.exists(temp_img_path):
-                os.remove(temp_img_path)
-
-        return extracted_data
