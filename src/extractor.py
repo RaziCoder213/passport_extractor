@@ -183,8 +183,15 @@ class PassportExtractor:
             # Define allowed characters for MRZ
             allow = st.ascii_uppercase + st.digits + "<"
             
-            # Run EasyOCR
-            code = self.reader.readtext(img_resized, detail=0, allowlist=allow)
+            # Run EasyOCR with stricter parameters
+            code = self.reader.readtext(
+                img_resized,
+                detail=0,
+                allowlist=allow,
+                paragraph=False,
+                width_ths=0.5,
+                height_ths=0.5
+            )
 
             if len(code) < 2:
                 logger.warning(f"EasyOCR found fewer than 2 lines in ROI for {img_path}")
@@ -192,6 +199,9 @@ class PassportExtractor:
 
             line1 = clean_mrz_line(code[0])
             line2 = clean_mrz_line(code[1])
+
+            line1 = correct_mrz_common_errors(line1)
+            line2 = correct_mrz_common_errors(line2)
 
             # Correct sex at index 20 of line 2 if available from mrz object
             # MRZ object might have parsed it correctly even if EasyOCR missed it
