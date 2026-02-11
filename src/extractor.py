@@ -279,3 +279,4 @@ class PassportExtractor:
                 os.remove(temp_img_path)
 
         return extracted_data
+        
