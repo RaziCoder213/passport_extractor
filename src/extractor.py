@@ -300,6 +300,14 @@ class PassportExtractor:
             return {"error": "File not found"}
 
         try:
+            # 0. First, try barcode detection (if available)
+            barcode_data = self.extract_from_barcode(img_path)
+            if barcode_data:
+                logger.info("Successfully extracted data from barcode")
+                # Add MRZ string placeholder for consistency
+                barcode_data["mrz_string"] = ""
+                return barcode_data
+
             # Load image with OpenCV
             image = cv2.imread(img_path)
             if image is None:
