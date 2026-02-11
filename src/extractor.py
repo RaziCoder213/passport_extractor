@@ -199,6 +199,10 @@ class PassportExtractor:
 
             line1 = clean_mrz_line(code[0])
             line2 = clean_mrz_line(code[1])
+            
+            logger.info(f"Extracted MRZ lines: Line1='{line1}', Line2='{line2}'")
+
+            # Correct sex at index 20 of line 2 if available from mrz object
 
             # Correct sex at index 20 of line 2 if available from mrz object
             # MRZ object might have parsed it correctly even if EasyOCR missed it
@@ -224,14 +228,34 @@ class PassportExtractor:
 
         line1, line2, mrz = self.extract_mrz_from_roi(img_path)
 
+        # Store the raw MRZ lines for display
+        raw_mrz_string = ""
+        if line1 and line2:
+            raw_mrz_string = line1 + "\n" + line2
+
         # If we have clean lines from EasyOCR, use them to create a new MRZ object
         # to ensure data consistency, overriding any potentially faulty data from passporteye
         if line1 and line2:
-            mrz = FallbackMRZ(line1, line2)
+            try:
+                mrz = FallbackMRZ(line1, line2)
+            except Exception as e:
+                logger.warning(f"FallbackMRZ failed: {e}, using raw lines")
 
         if mrz is None:
             logger.warning(f"Could not extract a valid MRZ from {img_path}")
-            return None
+            # Still return data with raw MRZ string even if parsing failed
+            return {
+                "surname": "",
+                "name": "",
+                "country": "",
+                "nationality": "",
+                "passport_number": "",
+                "sex": "",
+                "date_of_birth": "",
+                "expiration_date": "",
+                "mrz_full_string": raw_mrz_string,
+                "valid_score": 0,
+            }
         
         # Safely get data from MRZ object
         # FallbackMRZ has 'names', passporteye has 'name'. Let's check for both.
@@ -247,7 +271,7 @@ class PassportExtractor:
             "sex": get_sex(getattr(mrz, 'sex', '')),
             "date_of_birth": parse_date(getattr(mrz, 'date_of_birth', '')),
             "expiration_date": parse_date(getattr(mrz, 'expiration_date', '')),
-            "mrz_full_string": (line1 or "") + (line2 or ""),
+            "mrz_full_string": raw_mrz_string or ((line1 or "") + "\n" + (line2 or "")),
             "valid_score": getattr(mrz, 'valid_score', 0),
         }
         return data
