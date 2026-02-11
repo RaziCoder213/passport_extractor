@@ -13,6 +13,7 @@ from src.utils import (
     clean_string,
     clean_mrz_line,
     parse_date,
+    format_date_flydubai,
     get_country_name,
     get_sex,
     setup_logger,
@@ -163,8 +164,8 @@ class PassportExtractor:
             "nationality": get_country_name(getattr(mrz, "nationality", "")),
             "passport_number": clean_string(getattr(mrz, "number", "")),
             "sex": get_sex(getattr(mrz, "sex", "")),
-            "date_of_birth": parse_date(getattr(mrz, "date_of_birth", "")),
-            "expiration_date": parse_date(getattr(mrz, "expiration_date", "")),
+            "date_of_birth": format_date_flydubai(getattr(mrz, "date_of_birth", "")),
+            "expiration_date": format_date_flydubai(getattr(mrz, "expiration_date", "")),
             "mrz_full_string": (line1 or "") + (line2 or ""),
             "valid_score": getattr(mrz, "valid_score", 0),
         }
