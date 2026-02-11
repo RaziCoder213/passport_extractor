@@ -215,6 +215,15 @@ class PassportExtractor:
                             # Name might be on next line
                             if i + 1 < len(text_lines):
                                 given_name = text_lines[i + 1]
+                    elif '-' in line:
+                        # Handle dash separator (e.g., "GIVEN NAME - JOHN")
+                        parts = line.split('-', 1)
+                        if len(parts) > 1 and parts[1].strip():
+                            given_name = parts[1].strip()
+                        else:
+                            # Name might be on next line
+                            if i + 1 < len(text_lines):
+                                given_name = text_lines[i + 1]
                     elif line.endswith('GIVEN NAME') or line.endswith('GIVEN NAMES'):
                         # Name might be on next line
                         if i + 1 < len(text_lines):
@@ -243,7 +252,9 @@ class PassportExtractor:
                 # Remove common field labels that might have been captured
                 given_name = re.sub(r'^(NAME|NAMES|SURNAME|GIVEN)\s*[:\-]?\s*', '', given_name, flags=re.IGNORECASE)
                 # Remove any remaining common prefixes
-                given_name = re.sub(r'^(SURNAME|FAMILY NAME|LAST NAME)\s*[:\-]?\s*', '', given_name, flags=re.IGNORECASE)
+                given_name = re.sub(r'^(SURNAME|FAMILY NAME|LAST NAME|FIRST NAME)\s*[:\-]?\s*', '', given_name, flags=re.IGNORECASE)
+                # Remove any trailing field labels
+                given_name = re.sub(r'\s+(SURNAME|FAMILY NAME|LAST NAME|FIRST NAME|DATE|PLACE|NATIONALITY|SEX|PASSPORT)$', '', given_name, flags=re.IGNORECASE)
                 
                 # If the name is too long or contains unusual characters, it might be a false positive
                 if len(given_name) > 50 or any(char.isdigit() for char in given_name):
