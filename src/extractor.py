@@ -7,6 +7,7 @@ import ssl
 import re
 from passporteye import read_mrz
 from pdf2image import convert_from_path
+from PIL import Image
 import string as st
 
 from src.utils import (
@@ -176,24 +177,41 @@ class PassportExtractor:
     # PDF PROCESSING
     # ---------------------------------------------------
     def process_pdf(self, pdf_path, progress_callback=None, airline="flydubai"):
-        """Memory-safe PDF processing for Streamlit free tier."""
+        """
+        Memory-safe PDF processing for Streamlit free tier with fallback support.
+        Converts PDF pages to images and extracts passport data from each page.
+        
+        Args:
+            pdf_path (str): Path to the PDF file.
+            progress_callback (function, optional): Progress callback function.
+            airline (str): Airline format for date formatting ("flydubai", "default", "iraqi airways").
+            
+        Returns:
+            list: List of dictionaries with extracted passport data per page.
+        """
+        # Ensure temp directory exists before processing
+        os.makedirs(TEMP_DIR, exist_ok=True)
+        
+        # Check file size for Streamlit free tier (max 10 MB)
         try:
-            from pdf2image import pdfinfo_from_path
-            
-            # Ensure temp directory exists before processing
-            os.makedirs(TEMP_DIR, exist_ok=True)
-            
-            # Check file size for Streamlit free tier (max 10 MB)
             file_size = os.path.getsize(pdf_path)
             if file_size > 10 * 1024 * 1024:  # 10 MB limit
                 logger.error(f"PDF too large for free tier: {file_size / (1024*1024):.1f} MB")
                 return []
+        except Exception as e:
+            logger.error(f"Could not check file size: {e}")
+            return []
+        
+        results = []
+        
+        try:
+            # Try pdf2image first (primary method)
+            from pdf2image import pdfinfo_from_path, convert_from_path
             
             info = pdfinfo_from_path(pdf_path)
             total_pages = info["Pages"]
-            results = []
             
-            logger.info(f"Processing PDF with {total_pages} pages (size: {file_size / (1024*1024):.1f} MB)")
+            logger.info(f"Processing PDF with {total_pages} pages (size: {file_size / (1024*1024):.1f} MB) using pdf2image")
             
             for page in range(1, total_pages + 1):
                 try:
@@ -228,12 +246,60 @@ class PassportExtractor:
                         os.remove(temp_image_path)
                         
                 except Exception as e:
-                    logger.error(f"Error on page {page}: {e}")
+                    logger.error(f"Error on page {page} with pdf2image: {e}")
                     continue
             
-            logger.info(f"PDF processing finished. Valid pages: {len(results)}")
-            return results
+            logger.info(f"PDF processing finished with pdf2image. Valid pages: {len(results)}")
             
-        except Exception as e:
-            logger.error(f"PDF processing crashed: {e}")
-            return []
+        except Exception as pdf2image_error:
+            logger.warning(f"pdf2image failed: {pdf2image_error}. Trying fallback with PyMuPDF...")
+            
+            # Fallback to PyMuPDF (fitz)
+            try:
+                import fitz
+                
+                doc = fitz.open(pdf_path)
+                total_pages = len(doc)
+                
+                logger.info(f"Processing PDF with {total_pages} pages using PyMuPDF fallback")
+                
+                for i in range(total_pages):
+                    try:
+                        # Update progress if callback provided
+                        if progress_callback:
+                            progress_callback((i + 1) / total_pages)
+                        
+                        page = doc.load_page(i)
+                        pix = page.get_pixmap(dpi=200)
+                        
+                        # Convert to PIL Image
+                        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                        
+                        # Save temporary image to TEMP_DIR
+                        temp_image_path = os.path.join(TEMP_DIR, f"temp_page_{i+1}.png")
+                        img.save(temp_image_path, "PNG")
+                        
+                        # Extract passport data with airline-specific formatting
+                        result = self.get_data(temp_image_path, airline=airline)
+                        
+                        if result:
+                            result["page_number"] = i + 1
+                            results.append(result)
+                            logger.info(f"Successfully extracted data from page {i+1}")
+                        
+                        # Cleanup
+                        if os.path.exists(temp_image_path):
+                            os.remove(temp_image_path)
+                            
+                    except Exception as e:
+                        logger.error(f"Error on page {i+1} with PyMuPDF: {e}")
+                        continue
+                
+                doc.close()
+                logger.info(f"PDF processing finished with PyMuPDF fallback. Valid pages: {len(results)}")
+                
+            except Exception as fitz_error:
+                logger.error(f"PyMuPDF fallback also failed: {fitz_error}")
+                return []
+        
+        return results
