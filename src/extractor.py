@@ -396,6 +396,18 @@ class PassportExtractor:
                 # If the name is too long or contains unusual characters, it might be a false positive
                 if len(given_name) > 50 or any(char.isdigit() for char in given_name):
                     return None
+                
+                # Apply OCR error correction
+                given_name = self.correct_common_ocr_errors(given_name)
+                
+                # Apply pattern-based corrections
+                given_name = self.correct_name_patterns(given_name)
+                
+                # Final validation
+                if len(given_name) < 2:
+                    return None
+                
+                logger.info(f"Extracted given name from visual zone: {given_name}")
                     
                 return given_name
                 
