@@ -66,6 +66,8 @@ def main():
             progress_bar = st.progress(0)
             
             for i, file in enumerate(uploaded_files):
+                st.write(f"Processing file {i+1} of {len(uploaded_files)}: {file.name}")
+                
                 with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.name)[1]) as tmp:
                     tmp.write(file.getvalue())
                     tmp_path = tmp.name
@@ -84,6 +86,10 @@ def main():
                     for res in results:
                         res['source_file'] = file.name
                     all_results.extend(results)
+                    
+                except Exception as e:
+                    st.error(f"❌ Error processing {file.name}: {str(e)}")
+                    
                 finally:
                     os.remove(tmp_path)
                 
