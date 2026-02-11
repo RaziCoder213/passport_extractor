@@ -11,6 +11,7 @@ TEMP_DIR = os.path.join(BASE_DIR, 'temp_processing')
 # Ensure directories exist
 os.makedirs(INPUT_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+os.makedirs(TEMP_DIR, exist_ok=True)
 
 # Allowed file extensions
 ALLOWED_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.pdf'}
