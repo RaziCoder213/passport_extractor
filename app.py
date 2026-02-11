@@ -14,19 +14,18 @@ from src.formats import format_iraqi_airways, format_flydubai
 from src.utils import parse_date
 
 
-def process_pdf_file(uploaded_file, use_gpu=False, airline="flydubai"):
+def process_pdf_file(uploaded_file, airline="flydubai"):
     """
     Process a single uploaded PDF file and extract passport data.
 
     Args:
         uploaded_file: Uploaded file object (Streamlit or similar)
-        use_gpu (bool): Whether to use GPU acceleration
         airline (str): Airline format for date formatting ("flydubai", "default", "iraqi airways")
 
     Returns:
         List[dict]: Extracted passport data for each page/passport
     """
-    extractor = PassportExtractor(use_gpu=use_gpu)
+    extractor = PassportExtractor(use_gpu=True)
     results = []
     tmp_path = None
 
@@ -71,8 +70,8 @@ st.set_page_config(
 
 # Initialize Extractor (cached to avoid reloading model)
 @st.cache_resource
-def get_extractor(use_gpu=False):
-    return PassportExtractor(use_gpu=use_gpu)
+def get_extractor():
+    return PassportExtractor(use_gpu=True)
 
 def save_uploaded_file(uploaded_file):
     """Save uploaded file to a temporary location and return the path."""
@@ -97,8 +96,7 @@ def main():
 
     # Sidebar Configuration
     st.sidebar.header("Settings")
-    st.sidebar.info("💡 Running on Streamlit free tier - CPU only, max 10 MB per file")
-    use_gpu = st.sidebar.checkbox("Enable GPU Acceleration", value=False, disabled=True)  # Disabled for free tier
+    st.sidebar.info("💡 Optimized for performance - GPU enabled")
     airline = st.sidebar.selectbox("Choose Airline Format", ["Default", "Iraqi Airways", "Flydubai"])
 
     # File Uploader
@@ -117,7 +115,7 @@ def main():
             st.session_state.processing = True
             try:
                 # Initialize extractor inside the button click to use the latest settings
-                extractor = PassportExtractor(use_gpu=use_gpu)
+                extractor = PassportExtractor(use_gpu=True)
                 
                 all_results = []
                 
@@ -128,9 +126,12 @@ def main():
                 with progress_container:
                     main_progress_bar = st.progress(0)
                 
+                # Show single status line at the beginning
+                with status_container:
+                    status_text = st.empty()
+                    status_text.write(f"🔄 Processing {len(uploaded_files)} files...")
+                
                 for i, file in enumerate(uploaded_files):
-                    with status_container:
-                        st.write(f"Processing file {i+1} of {len(uploaded_files)}: {file.name}")
                     
                     # Check file size for Streamlit free tier
                     try:
@@ -157,7 +158,7 @@ def main():
                         if is_pdf:
                             try:
                                 # Use the new standalone PDF processing function
-                                results = process_pdf_file(file, use_gpu=use_gpu, airline=airline.lower())
+                                results = process_pdf_file(file, airline=airline.lower())
                             except Exception as e:
                                 results = []
                                 
@@ -185,9 +186,13 @@ def main():
                     with progress_container:
                         main_progress_bar.progress((i + 1) / len(uploaded_files))
 
+                # Update status to show completion
+                with status_container:
+                    status_text.write(f"✅ Processing complete!")
+
                 # Show results only after all processing is complete
                 successful_files = len(set(result.get('source_file', '') for result in all_results))
-                st.success(f"✅ Successfully processed {successful_files} of {len(uploaded_files)} files")
+                st.success(f"📋 Extracted data from {successful_files} of {len(uploaded_files)} files")
                 
                 if not all_results:
                     st.warning("No data could be extracted. Please check the files or try again.")
