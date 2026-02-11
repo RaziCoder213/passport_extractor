@@ -80,8 +80,11 @@ class PassportExtractor:
                         else:
                             return ""
 
-                    # Keep only letters and spaces
+                    # Keep only letters and spaces, but preserve spaces between names
                     candidate = re.sub(r'[^A-Za-z\s]', '', candidate)
+                    
+                    # Clean up extra spaces but keep single spaces between names
+                    candidate = re.sub(r'\s+', ' ', candidate).strip()
 
                     # Remove trailing single letter only if it's clearly an OCR artifact (not part of a name)
                     # This is more conservative - only removes single letters that are likely OCR errors
@@ -116,7 +119,10 @@ class PassportExtractor:
             code = self.reader.readtext(
                 img_resized,
                 detail=0,
-                allowlist=allow
+                allowlist=allow,
+                batch_size=1,  # Single image processing for speed
+                workers=0,     # Use main thread for stability
+                decoder='greedy'  # Faster decoding
             )
 
             if len(code) < 2:
@@ -217,7 +223,7 @@ class PassportExtractor:
             info = pdfinfo_from_path(pdf_path)
             total_pages = info["Pages"]
             
-            logger.info(f"Processing PDF with {total_pages} pages (size: {file_size / (1024*1024):.1f} MB) using pdf2image")
+            logger.debug(f"Processing PDF with {total_pages} pages (size: {file_size / (1024*1024):.1f} MB) using pdf2image")
             
             for page in range(1, total_pages + 1):
                 try:
@@ -225,19 +231,21 @@ class PassportExtractor:
                     if progress_callback:
                         progress_callback(page / total_pages)
                     
-                    # Convert ONE page at a time, reduce DPI for memory efficiency
+                    # Convert ONE page at a time, optimize for speed
                     images = convert_from_path(
                         pdf_path,
-                        dpi=200,  # Reduced DPI for memory efficiency
+                        dpi=150,  # Further reduced DPI for faster processing
                         first_page=page,
-                        last_page=page
+                        last_page=page,
+                        thread_count=1,  # Single thread for stability
+                        use_pdftocairo=True  # Faster backend
                     )
                     
                     image = images[0]
                     
-                    # Save temporary image to TEMP_DIR
+                    # Save temporary image to TEMP_DIR with lower quality for speed
                     temp_image_path = os.path.join(TEMP_DIR, f"temp_page_{page}.jpg")
-                    image.save(temp_image_path, "JPEG", quality=85)  # Reduced quality for memory
+                    image.save(temp_image_path, "JPEG", quality=70, optimize=True)
                     
                     # Extract passport data with airline-specific formatting
                     result = self.get_data(temp_image_path, airline=airline)
@@ -267,7 +275,7 @@ class PassportExtractor:
                 doc = fitz.open(pdf_path)
                 total_pages = len(doc)
                 
-                logger.info(f"Processing PDF with {total_pages} pages using PyMuPDF fallback")
+                logger.debug(f"Processing PDF with {total_pages} pages using PyMuPDF fallback")
                 
                 for i in range(total_pages):
                     try:
