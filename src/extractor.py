@@ -53,31 +53,77 @@ class PassportExtractor:
     # ---------------------------------------------------
     # 🔥 EXTRACT GIVEN NAMES FROM VISUAL FIELD
     # ---------------------------------------------------
-    def extract_given_names_from_visual(self, img_path):
-        """
-        Extract name from visible 'Given Names' field.
-        """
-        try:
-            results = self.reader.readtext(img_path, detail=0)
-            lines = [r.strip() for r in results if r.strip()]
+    Good. That tells me exactly what is happening.
 
-            for i, line in enumerate(lines):
-                upper_line = line.upper()
+Your OCR is reading:
 
-                # Detect label
-                if "GIVEN" in upper_line and "NAME" in upper_line:
+SYED IBRAHEEMK
 
-                    # Case 1: Same line format
-                    if ":" in line:
-                        parts = line.split(":")
-                        if len(parts) > 1 and parts[1].strip():
-                            return parts[1].strip()
 
-                    # Case 2: Name on next line
+The extra “K” is not from MRZ.
+It is coming from OCR noise — usually from:
+
+Next field bleeding (like country code PK)
+
+The word “PAKISTAN”
+
+Or background edge touching the name
+
+So we must clean the extracted name properly, not just return raw OCR text.
+
+✅ Proper Fix (Remove trailing garbage letters safely)
+
+Replace your extract_given_names_from_visual() with this cleaned version:
+
+import re
+
+def extract_given_names_from_visual(self, img_path):
+    """
+    Extract name from visible 'Given Names' field
+    and remove OCR garbage at the end.
+    """
+    try:
+        results = self.reader.readtext(img_path, detail=0)
+        lines = [r.strip() for r in results if r.strip()]
+
+        for i, line in enumerate(lines):
+            upper_line = line.upper()
+
+            if "GIVEN" in upper_line and "NAME" in upper_line:
+
+                # Case 1: Same line
+                if ":" in line:
+                    candidate = line.split(":")[1].strip()
+                else:
+                    # Case 2: Next line
                     if i + 1 < len(lines):
-                        return lines[i + 1].strip()
+                        candidate = lines[i + 1].strip()
+                    else:
+                        return ""
 
-            return ""
+                # -----------------------------
+                # 🔥 CLEAN THE NAME PROPERLY
+                # -----------------------------
+
+                # Keep only letters and spaces
+                candidate = re.sub(r'[^A-Za-z\s]', '', candidate)
+
+                # Remove extra single letter at end (like K)
+                words = candidate.split()
+
+                # If last word is 1 character, remove it
+                if len(words) > 1 and len(words[-1]) == 1:
+                    words = words[:-1]
+
+                cleaned_name = " ".join(words)
+
+                return cleaned_name.strip()
+
+        return ""
+
+    except Exception as e:
+        logger.error(f"Given Names extraction failed: {e}")
+        return ""
 
         except Exception as e:
             logger.error(f"Given Names extraction failed: {e}")
