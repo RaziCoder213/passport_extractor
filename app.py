@@ -73,9 +73,13 @@ def main():
                 try:
                     if file.type == "application/pdf":
                         results = extractor.process_pdf(tmp_path)
+                        if not results:
+                            st.warning(f"⚠️ No passport data found in PDF: {file.name}")
                     else:
                         result = extractor.get_data(tmp_path)
                         results = [result] if result else []
+                        if not results:
+                            st.warning(f"⚠️ No passport data found in image: {file.name}")
                     
                     for res in results:
                         res['source_file'] = file.name
