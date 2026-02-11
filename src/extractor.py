@@ -149,23 +149,11 @@ class PassportExtractor:
                     roi = roi.astype(np.uint8)
 
             # Preprocess ROI for EasyOCR
-            # Convert to grayscale if not already
-            if len(roi.shape) == 3: # If it's a color image
-                roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-
-            # Increase contrast
-            roi = cv2.equalizeHist(roi)
-
-            # Remove noise
-            roi = cv2.GaussianBlur(roi, (5,5), 0)
-
-            # Threshold
-            roi = cv2.adaptiveThreshold(
-                roi, 255,
-                cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                cv2.THRESH_BINARY,
-                11, 2
-            )
+            # Original code: saved to tmp.png (gray), read back, resized to (1110, 140)
+            # We will try to do this in memory using OpenCV
+            
+            # roi is likely a numpy array (H, W) or (H, W, C). PassportEye usually returns grayscale for ROI?
+            # Let's normalize to BGR for OpenCV consistency if needed, or keep grayscale.
             
             # Resize to improve OCR accuracy as per original code logic
             # Note: (1110, 140) is the target size (Width, Height)
