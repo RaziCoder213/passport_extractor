@@ -253,7 +253,7 @@ class PassportExtractor:
                     if result:
                         result["page_number"] = page
                         results.append(result)
-                        logger.info(f"Successfully extracted data from page {page}")
+                        logger.debug(f"Successfully extracted data from page {page}")
                     
                     # Delete temp image immediately to free memory
                     if os.path.exists(temp_image_path):
@@ -263,7 +263,7 @@ class PassportExtractor:
                     logger.error(f"Error on page {page} with pdf2image: {e}")
                     continue
             
-            logger.info(f"PDF processing finished with pdf2image. Valid pages: {len(results)}")
+            logger.debug(f"PDF processing finished with pdf2image. Valid pages: {len(results)}")
             
         except Exception as pdf2image_error:
             logger.warning(f"pdf2image failed: {pdf2image_error}. Trying fallback with PyMuPDF...")
@@ -299,7 +299,7 @@ class PassportExtractor:
                         if result:
                             result["page_number"] = i + 1
                             results.append(result)
-                            logger.info(f"Successfully extracted data from page {i+1}")
+                            logger.debug(f"Successfully extracted data from page {i+1}")
                         
                         # Cleanup
                         if os.path.exists(temp_image_path):
@@ -310,7 +310,7 @@ class PassportExtractor:
                         continue
                 
                 doc.close()
-                logger.info(f"PDF processing finished with PyMuPDF fallback. Valid pages: {len(results)}")
+                logger.debug(f"PDF processing finished with PyMuPDF fallback. Valid pages: {len(results)}")
                 
             except Exception as fitz_error:
                 logger.error(f"PyMuPDF fallback also failed: {fitz_error}")
