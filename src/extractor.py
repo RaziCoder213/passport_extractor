@@ -23,7 +23,8 @@ from src.utils import (
     parse_date, 
     get_country_name, 
     get_sex, 
-    setup_logger
+    setup_logger,
+    clean_name_field
 )
 from src.fallback_mrz import FallbackMRZ
 from config.settings import USE_GPU, OCR_LANGUAGES, TEMP_DIR
@@ -159,7 +160,7 @@ class PassportExtractor:
             img_resized = cv2.resize(roi, (1110, 140))
             
             # Define allowed characters for MRZ
-            allow = st.ascii_letters + st.digits + "< "
+            allow = st.ascii_uppercase + st.digits + "<"
             
             # Run EasyOCR
             code = self.reader.readtext(img_resized, detail=0, allowlist=allow)
@@ -184,7 +185,7 @@ class PassportExtractor:
             logger.error(f"Error in extract_mrz_from_roi: {e}")
             return None, None, None
 
-    def get_data(self, img_path):
+    def get_data(self, img_path, airline=None):
         """
         Extracts full passport data from an image file.
         Returns a dictionary of extracted fields.
@@ -195,13 +196,63 @@ class PassportExtractor:
 
         line1, line2, mrz = self.extract_mrz_from_roi(img_path)
 
+        # If we have clean lines from EasyOCR, use them to create a new MRZ object
+        # to ensure data consistency, overriding any potentially faulty data from passporteye
+        if line1 and line2:
+            mrz = FallbackMRZ(line1, line2)
+
         if mrz is None:
+            logger.warning(f"Could not extract a valid MRZ from {img_path}")
             return None
+        
+        # Safely get data from MRZ object
+        # FallbackMRZ has 'names', passporteye has 'name'. Let's check for both.
+        surname = clean_name_field(getattr(mrz, 'surname', ''))
+        name = clean_name_field(getattr(mrz, 'names', getattr(mrz, 'name', '')))
+
+        data = {
+            "surname": surname,
+            "name": name,
+            "country": get_country_name(getattr(mrz, 'country', '')),
+            "nationality": get_country_name(getattr(mrz, 'nationality', '')),
+            "passport_number": clean_string(getattr(mrz, 'number', '')),
+            "sex": get_sex(getattr(mrz, 'sex', '')),
+            "date_of_birth": parse_date(getattr(mrz, 'date_of_birth', '')),
+            "expiration_date": parse_date(getattr(mrz, 'expiration_date', '')),
+            "mrz_full_string": (line1 or "") + (line2 or ""),
+            "valid_score": getattr(mrz, 'valid_score', 0),
+        }
+        return data
+
+    def process_pdf(self, pdf_path, airline=None):
+        """
+        Extracts passport data from all pages of a PDF file.
+        Returns a list of dictionaries, one for each page with a valid MRZ.
+        """
+        if not os.path.exists(TEMP_DIR):
+            os.makedirs(TEMP_DIR)
+
+        try:
+            images = convert_from_path(pdf_path, dpi=300)
+            results = []
+            for i, img in enumerate(images):
+                page_path = os.path.join(TEMP_DIR, f"page_{i}.png")
+                img.save(page_path, 'PNG')
+                
+                data = self.get_data(page_path, airline=airline)
+                if data:
+                    data['source_page'] = i + 1
+                    results.append(data)
+            
+            return results
+        except Exception as e:
+            logger.error(f"PDF processing failed for {pdf_path}: {e}")
+            return []
 
         data = {}
         # Use PassportEye's parsing where possible, fallback/clean as needed
-        data['surname'] = mrz.surname.replace("<<", " ").strip().upper() if mrz.surname else ""
-        data['name'] = mrz.names.replace("<<", " ").strip().upper() if mrz.names else ""
+        data['surname'] = clean_name_field(mrz.surname)
+        data['name'] = clean_name_field(mrz.names)
         data['sex'] = get_sex(mrz.sex)
         data['date_of_birth'] = parse_date(mrz.date_of_birth) if mrz.date_of_birth else ""
         data['nationality'] = get_country_name(mrz.nationality)
@@ -211,12 +262,6 @@ class PassportExtractor:
         data['expiration_date'] = parse_date(mrz.expiration_date)
         data['personal_number'] = clean_string(mrz.personal_number)
         
-        # Fix: remove accidental trailing 'K' from names/surname caused by OCR/parse noise
-        # If the field ends with a single 'K' character (no separating space) it's likely an artifact.
-        for key in ('name', 'surname'):
-            val = data.get(key, "")
-            if val and val.endswith('K') and not val.endswith(' K') and len(val) > 2:
-                data[key] = val[:-1].strip()
         # Construct full MRZ string
         # Prefer the OCR'd lines if they exist, otherwise fallback?
         # The original code returned (line1 or "") + (line2 or "")
@@ -279,4 +324,3 @@ class PassportExtractor:
                 os.remove(temp_img_path)
 
         return extracted_data
-        
