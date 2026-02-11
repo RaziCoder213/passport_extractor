@@ -215,22 +215,21 @@ def main():
                                 pass
                         
                         # Add source file to results and extend all_results
-                        mrz_found_in_file = False
                         for res in results:
                             res['source_file'] = file.name
-                            # Check if MRZ was found in any result
-                            if res.get('mrz_found', False):
-                                mrz_found_in_file = True
+                            # Add status field to indicate if MRZ was found
+                            if 'mrz_found' not in res:
+                                res['mrz_found'] = True
                         all_results.extend(results)
                         
-                        # Track problematic files - check if MRZ was found OR if no results
-                        if not file_processed or not results or not mrz_found_in_file:
+                        # Track problematic files
+                        if not file_processed or not results:
                             problematic_files.append({
                                 'file_name': file.name,
                                 'issue': 'No MRZ data found - image may be blurry or passport not detected'
                             })
                             # Debug output
-                            print(f"DEBUG: Added problematic file: {file.name} (file_processed: {file_processed}, results: {len(results)}, mrz_found: {mrz_found_in_file})")
+                            print(f"DEBUG: Added problematic file: {file.name} (file_processed: {file_processed}, results: {len(results)})")
                         
                     except Exception as e:
                         # Track files that caused errors
@@ -285,41 +284,39 @@ def main():
 
                 st.dataframe(df)
                 
-                # Handle problematic files export popup - ALWAYS SHOW WHEN THERE ARE PROBLEMATIC FILES
+                # Handle problematic files export popup
+                print(f"DEBUG: About to check problematic_files popup. Length: {len(problematic_files)}")
                 if problematic_files:
-                    # Create a prominent warning box
-                    st.warning("🚨 ATTENTION: Some files could not be processed!")
-                    
-                    # Show the problematic files prominently
-                    st.error(f"**{len(problematic_files)} file(s) have issues:**")
-                    
-                    # Always show details expanded for problematic files
-                    with st.expander(f"📋 Click to see details of {len(problematic_files)} problematic file(s)", expanded=True):
-                        for problem in problematic_files:
-                            st.write(f"• **{problem['file_name']}**: {problem['issue']}")
-                    
+                    print(f"DEBUG: Showing popup for {len(problematic_files)} problematic files")
                     # Initialize session state for export decision if not exists
                     if 'export_decision_made' not in st.session_state:
                         st.session_state.export_decision_made = False
                     if 'include_problematic_files' not in st.session_state:
                         st.session_state.include_problematic_files = False
                     
-                    # Show export confirmation dialog in a prominent box
+                    # Show export confirmation dialog
                     if not st.session_state.export_decision_made:
-                        st.info("**📤 EXPORT OPTIONS:**")
-                        st.write("**Would you like to include these problematic files in your export?**")
-                        st.write("✅ **YES**: Include all files (problematic ones will show ••• for missing data)")
-                        st.write("❌ **NO**: Export only successfully processed files")
+                        st.subheader("⚠️ Export Confirmation Required")
+                        st.write(f"**{len(problematic_files)} file(s) could not be processed properly:**")
+                        
+                        # Show problematic files details
+                        with st.expander(f"Click to see details of {len(problematic_files)} problematic file(s)"):
+                            for problem in problematic_files:
+                                st.write(f"• **{problem['file_name']}**: {problem['issue']}")
+                        
+                        st.write("**Would you like to include these files in your export?**")
+                        st.write("• **Yes**: Files will show dots (•••) for missing data")
+                        st.write("• **No**: Only successfully processed files will be exported")
                         
                         col1, col2 = st.columns(2)
                         with col1:
-                            if st.button("✅ YES, Include All Files", type="primary", use_container_width=True):
+                            if st.button("✅ Yes, Include All Files", type="primary", use_container_width=True):
                                 st.session_state.include_problematic_files = True
                                 st.session_state.export_decision_made = True
                                 st.rerun()
                         
                         with col2:
-                            if st.button("❌ NO, Export Only Good Files", type="secondary", use_container_width=True):
+                            if st.button("❌ No, Export Only Good Files", type="secondary", use_container_width=True):
                                 st.session_state.include_problematic_files = False
                                 st.session_state.export_decision_made = True
                                 st.rerun()
@@ -352,21 +349,14 @@ def main():
                         else:
                             export_df = df
                         
-                        # Show current decision
-                        decision_text = "✅ Including problematic files" if st.session_state.include_problematic_files else "❌ Excluding problematic files"
-                        st.success(f"Export decision: {decision_text}")
-                        
                         # Add reset button to change decision
-                        if st.button("🔄 Change Export Decision", help="Click to change your export preference"):
+                        if st.button("🔄 Change Export Decision"):
                             st.session_state.export_decision_made = False
                             st.rerun()
-                    else:
-                        # No decision made yet, use only successful files for now
-                        export_df = df
                 else:
                     export_df = df
                 
-                # Download buttons - now export_df is guaranteed to be defined
+                # Download buttons - moved inside try block where df is guaranteed to be defined
                 col1, col2 = st.columns(2)
                 
                 with col1:
