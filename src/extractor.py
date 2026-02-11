@@ -29,7 +29,8 @@ from src.utils import (
     get_country_name, 
     get_sex, 
     setup_logger,
-    clean_name_field
+    clean_name_field,
+    parse_barcode_data
 )
 from src.fallback_mrz import FallbackMRZ
 from config.settings import USE_GPU, OCR_LANGUAGES, TEMP_DIR
@@ -256,34 +257,10 @@ class PassportExtractor:
                 barcode_data = barcode.data.decode('utf-8')
                 logger.info(f"Found PDF417 barcode with data: {barcode_data[:50]}...")
                 
-                # US / Canada / MRZ embedded usually has fields separated by newlines or fixed width
-                # Example (US Passport card):
-                # @\nLASTNAME<FIRSTNAME<MIDDLE<\n1234567890USA...
-                lines = barcode_data.split('\n')
-                if len(lines) < 2:
-                    continue
-
-                # Extract names from first line
-                name_line = lines[0].replace('@','').replace('<',' ').strip()
-                surname, given_names = name_line.split(' ', 1) if ' ' in name_line else (name_line, '')
-
-                # Parse remaining fields (simplified)
-                passport_number = lines[1][:9]  # first 9 digits
-                nationality = lines[1][9:12]
-                dob = parse_date(lines[1][12:18])
-                sex = lines[1][18]
-                expiry = parse_date(lines[1][19:25])
-
-                return {
-                    "surname": clean_name_field(surname),
-                    "given_names": clean_name_field(given_names),
-                    "passport_number": passport_number,
-                    "nationality": nationality,
-                    "sex": sex,
-                    "date_of_birth": dob,
-                    "expiration_date": expiry,
-                    "barcode_data": barcode_data
-                }
+                # Use the new parsing function
+                parsed_data = parse_barcode_data(barcode_data)
+                if parsed_data:
+                    return parsed_data
 
             return None
         except Exception as e:
