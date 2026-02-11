@@ -19,14 +19,14 @@ def setup_logger(name=__name__):
 logger = setup_logger(__name__)
 
 def parse_date(date_obj, iob=True):
-    """Parses a date object or string into DD/MM/YYYY format."""
+    """Parses a date object or string into DD MON YY format (flydubai format)."""
     try:
         date_str = date_obj.isoformat() if hasattr(date_obj, 'isoformat') else str(date_obj)
         # Passport dates are often YYMMDD, but dateutil usually handles it if formatted correctly.
         # However, MRZ dates are tricky. PassportEye usually returns YYMMDD.
         # parser.parse might struggle with 2-digit years without context, but let's trust existing logic first.
         date = parser.parse(date_str, yearfirst=True).date()
-        return date.strftime('%d/%m/%Y')
+        return date.strftime('%d%b%y').upper()
     except (ValueError, TypeError) as e:
         logger.debug(f"Date parsing failed for {date_obj}: {e}")
         return str(date_obj)
