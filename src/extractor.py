@@ -175,51 +175,65 @@ class PassportExtractor:
     # ---------------------------------------------------
     # PDF PROCESSING
     # ---------------------------------------------------
-    def process_pdf(self, pdf_path):
-        """Process a PDF file and extract passport data from all pages."""
+    def process_pdf(self, pdf_path, progress_callback=None):
+        """Memory-safe PDF processing for Streamlit free tier."""
         try:
-            logger.info(f"Processing PDF: {pdf_path}")
+            from pdf2image import pdfinfo_from_path
             
-            # Ensure temp directory exists
+            # Ensure temp directory exists before processing
             os.makedirs(TEMP_DIR, exist_ok=True)
             
-            # Convert PDF to images with error handling
-            try:
-                images = convert_from_path(pdf_path, dpi=200)  # Increased DPI for better quality
-                logger.info(f"Converted PDF to {len(images)} pages")
-            except Exception as e:
-                logger.error(f"Failed to convert PDF to images: {e}")
+            # Check file size for Streamlit free tier (max 10 MB)
+            file_size = os.path.getsize(pdf_path)
+            if file_size > 10 * 1024 * 1024:  # 10 MB limit
+                logger.error(f"PDF too large for free tier: {file_size / (1024*1024):.1f} MB")
                 return []
             
+            info = pdfinfo_from_path(pdf_path)
+            total_pages = info["Pages"]
             results = []
             
-            for i, image in enumerate(images):
+            logger.info(f"Processing PDF with {total_pages} pages (size: {file_size / (1024*1024):.1f} MB)")
+            
+            for page in range(1, total_pages + 1):
                 try:
-                    # Save temporary image
-                    temp_image_path = os.path.join(TEMP_DIR, f"temp_page_{i}.jpg")
-                    image.save(temp_image_path, 'JPEG', quality=95)
-                    logger.info(f"Processing page {i+1}")
+                    # Update progress if callback provided
+                    if progress_callback:
+                        progress_callback(page / total_pages)
                     
-                    # Extract data from this page
+                    # Convert ONE page at a time, reduce DPI for memory efficiency
+                    images = convert_from_path(
+                        pdf_path,
+                        dpi=200,  # Reduced DPI for memory efficiency
+                        first_page=page,
+                        last_page=page
+                    )
+                    
+                    image = images[0]
+                    
+                    # Save temporary image to TEMP_DIR
+                    temp_image_path = os.path.join(TEMP_DIR, f"temp_page_{page}.jpg")
+                    image.save(temp_image_path, "JPEG", quality=85)  # Reduced quality for memory
+                    
+                    # Extract passport data
                     result = self.get_data(temp_image_path)
+                    
                     if result:
-                        result['page_number'] = i + 1
+                        result["page_number"] = page
                         results.append(result)
-                        logger.info(f"Successfully extracted data from page {i+1}")
-                    else:
-                        logger.warning(f"No data extracted from page {i+1}")
-                        
-                except Exception as e:
-                    logger.error(f"Error processing page {i+1}: {e}")
-                    continue
-                finally:
-                    # Clean up temporary file
+                        logger.info(f"Successfully extracted data from page {page}")
+                    
+                    # Delete temp image immediately to free memory
                     if os.path.exists(temp_image_path):
                         os.remove(temp_image_path)
+                        
+                except Exception as e:
+                    logger.error(f"Error on page {page}: {e}")
+                    continue
             
-            logger.info(f"PDF processing complete. Found {len(results)} valid pages")
+            logger.info(f"PDF processing finished. Valid pages: {len(results)}")
             return results
             
         except Exception as e:
-            logger.error(f"PDF processing failed for {pdf_path}: {e}")
+            logger.error(f"PDF processing crashed: {e}")
             return []
