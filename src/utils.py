@@ -67,22 +67,19 @@ def clean_name_field(text):
     return cleaned
 
 def clean_mrz_line(line: str) -> str:
-    """Fix bad spacing or bad OCR for MRZ lines."""
+    """Clean MRZ line by removing noise without adding characters."""
     if not line:
         return ""
     
     line = line.upper().replace(" ", "")
     
-    # Remove accidental characters except allowed
+    # Remove any characters that shouldn't be in MRZ
+    # Keep only uppercase letters, digits, and '<'
     allowed = set(st.ascii_uppercase + st.digits + "<")
     line = "".join([c for c in line if c in allowed])
-
-    # Ensure 44 length (standard TD3 MRZ length)
-    # Note: TD1/TD2 might be different lengths (30 or 36), but this logic enforces 44.
-    # We will keep existing logic for consistency but be aware of other formats.
-    if len(line) < 44:
-        line += "<" * (44 - len(line))
-    return line[:44]
+    
+    # Don't force length - keep what we have
+    return line
 
 def get_country_name(country_code):
     """Resolves 3-letter country code to full name."""
