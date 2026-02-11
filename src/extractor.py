@@ -160,3 +160,143 @@ class PassportExtractor:
         except Exception as e:
             logger.error(f"Direct EasyOCR fallback failed: {e}")
             return None, None, None
+
+    def find_mrz_region(self, image):
+        """
+        Find the MRZ region in the image using morphological operations.
+        """
+        try:
+            # Resize image for faster processing, maintaining aspect ratio
+            h, w = image.shape[:2]
+            aspect_ratio = w / h
+            new_h = 600
+            new_w = int(new_h * aspect_ratio)
+            resized = cv2.resize(image, (new_w, new_h))
+
+            # Convert to grayscale
+            gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
+
+            # Blackhat morphological operation to reveal dark text on light background
+            rect_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (13, 5))
+            blackhat = cv2.morphologyEx(gray, cv2.MORPH_BLACKHAT, rect_kernel)
+
+            # Sobel operator to find vertical gradients
+            grad_x = cv2.Sobel(blackhat, ddepth=cv2.CV_32F, dx=1, dy=0, ksize=-1)
+            grad_x = np.absolute(grad_x)
+            (min_val, max_val) = (np.min(grad_x), np.max(grad_x))
+            grad_x = (255 * ((grad_x - min_val) / (max_val - min_val))).astype("uint8")
+
+            # Close gaps between characters and apply threshold
+            grad_x = cv2.morphologyEx(grad_x, cv2.MORPH_CLOSE, rect_kernel)
+            thresh = cv2.threshold(grad_x, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
+
+            # Close gaps between lines and perform erosions/dilations
+            thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (21, 7)))
+            thresh = cv2.erode(thresh, None, iterations=2)
+            thresh = cv2.dilate(thresh, None, iterations=2)
+
+            # Find contours
+            contours, _ = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+            # Filter contours by aspect ratio and size to find the MRZ
+            for cnt in contours:
+                (x, y, w, h) = cv2.boundingRect(cnt)
+                ar = w / float(h)
+                
+                # Heuristic: MRZ is wide and short
+                if ar > 4 and w > new_w * 0.75:
+                    # Scale back to original image size
+                    orig_x = int(x * (image.shape[1] / new_w))
+                    orig_y = int(y * (image.shape[0] / new_h))
+                    orig_w = int(w * (image.shape[1] / new_w))
+                    orig_h = int(h * (image.shape[0] / new_h))
+                    
+                    # Add some padding
+                    pX = int((orig_x + orig_w) * 0.03)
+                    pY = int((orig_y + orig_h) * 0.05)
+                    (x, y) = (orig_x - pX, orig_y - pY)
+                    (w, h) = (orig_w + (pX * 2), orig_h + (pY * 2))
+                    
+                    return (x, y, w, h)
+            
+            return None
+        except Exception as e:
+            logger.error(f"Error finding MRZ region: {e}")
+            return None
+
+    def get_data(self, img_path, airline=None):
+        """
+        Extracts full passport data from an image file.
+        Returns a dictionary of extracted fields.
+        """
+        if not os.path.exists(img_path):
+            logger.error(f"File not found: {img_path}")
+            return {"error": "File not found"}
+
+        try:
+            # Load image with OpenCV
+            image = cv2.imread(img_path)
+            if image is None:
+                return {"error": "Could not read image"}
+
+            # 1. Try to find MRZ region first
+            mrz_coords = self.find_mrz_region(image)
+            mrz_lines = []
+            if mrz_coords:
+                (x, y, w, h) = mrz_coords
+                mrz_roi = image[y:y+h, x:x+w]
+                
+                # Clean the ROI for better OCR
+                cleaned_roi = self.clean_image_for_ocr(mrz_roi)
+                
+                # Use easyocr on the cleaned ROI
+                result = self.reader.readtext(cleaned_roi, detail=0, paragraph=False)
+                
+                if len(result) >= 2:
+                    # Assume the last two lines are the MRZ
+                    mrz_lines = [clean_mrz_line(line) for line in result[-2:]]
+            
+            # 2. If MRZ not found with our method, use PassportEye
+            if not mrz_lines:
+                mrz = read_mrz(img_path, save_roi=True)
+                if mrz:
+                    mrz_lines = [clean_mrz_line(line) for line in mrz.aux['mrz_text'].split('\n')]
+                else:
+                    # 3. Fallback to rotation
+                    mrz = self._retry_with_rotation(img_path)
+                    if mrz:
+                        mrz_lines = [clean_mrz_line(line) for line in mrz.aux['mrz_text'].split('\n')]
+
+            # 4. If still no MRZ, use direct EasyOCR fallback
+            if not mrz_lines:
+                line1, line2, _ = self._fallback_direct_easyocr(img_path)
+                if line1 and line2:
+                    mrz_lines = [line1, line2]
+
+            # If we have MRZ lines, parse them
+            if mrz_lines and len(mrz_lines) >= 2:
+                line1, line2 = mrz_lines[-2], mrz_lines[-1]
+                mrz_obj = FallbackMRZ(line1, line2)
+                
+                # Final data structure
+                passport_data = {
+                    "surname": clean_name_field(mrz_obj.surname),
+                    "names": clean_name_field(mrz_obj.names),
+                    "passport_number": clean_string(mrz_obj.number),
+                    "country_code": clean_string(mrz_obj.country),
+                    "nationality": get_country_name(mrz_obj.nationality),
+                    "date_of_birth": parse_date(mrz_obj.date_of_birth),
+                    "sex": get_sex(mrz_obj.sex),
+                    "expiration_date": parse_date(mrz_obj.expiration_date),
+                    "personal_number": clean_string(mrz_obj.personal_number),
+                    "mrz_string": f"{line1}\n{line2}"
+                }
+                return passport_data
+
+            # 5. If all MRZ methods fail, return an error
+            logger.error("All MRZ detection methods failed.")
+            return {"error": "Could not extract MRZ from the image."}
+
+        except Exception as e:
+            logger.error(f"An error occurred during get_data: {e}")
+            return {"error": str(e)}
