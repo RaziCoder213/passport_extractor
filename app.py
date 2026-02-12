@@ -353,7 +353,7 @@ def main():
                 print(f"DEBUG: Total problematic files: {len(problematic_files)}")
                 print(f"DEBUG: Total results: {len(all_results)}")
                 for problem in problematic_files:
-                    print(f"DEBUG: Problematic: {problem['file_name']} - {problem['issue']}")
+                    print(f"DEBUG: Problematic: {problem.get('file_name', '<unknown>')} - {problem.get('reason') or problem.get('issue') or problem.get('message') or problem.get('error') or '<unspecified>'}")
 
                 # Filter out problematic results from all_results
                 good_results = []
@@ -376,7 +376,21 @@ def main():
                     with st.expander("📋 Click to see failed passport details"):
                         st.write("**Failed Passports:**")
                         for problem in problematic_files:
-                            st.write(f"• {problem['file_name']} - {problem['reason']}")
+                            display_name = None
+                            for res in all_results:
+                                if res.get('source_file') == problem.get('file_name'):
+                                    display_name = (
+                                        res.get('surname') or
+                                        res.get('given_names') or
+                                        res.get('name') or
+                                        res.get('Last Name') or
+                                        res.get('First Name and Middle Name')
+                                    )
+                                    break
+                            if display_name:
+                                st.write(f"• {problem.get('file_name', '<unknown>')} - {display_name} - {problem.get('reason') or problem.get('issue') or problem.get('message') or problem.get('error') or '<unspecified>'}")
+                            else:
+                                st.write(f"• {problem.get('file_name', '<unknown>')} - {problem.get('reason') or problem.get('issue') or problem.get('message') or problem.get('error') or '<unspecified>'}")
                 else:
                     st.success(f"✅ All {successful_files} passports were successfully imported")
 
