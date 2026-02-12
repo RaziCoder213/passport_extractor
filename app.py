@@ -151,7 +151,49 @@ def main():
     # Initialize session state to prevent crashes from rapid clicks
     if 'processing' not in st.session_state:
         st.session_state.processing = False
+    if 'results_df' not in st.session_state:
+        st.session_state.results_df = None
+    if 'airline_format' not in st.session_state:
+        st.session_state.airline_format = None
 
+    # Display existing results if available
+    if st.session_state.results_df is not None:
+        st.subheader("📊 Extracted Data")
+        st.dataframe(st.session_state.results_df)
+        
+        # Show export options for existing results
+        st.subheader("📥 Export Data")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            csv = st.session_state.results_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="Download data as CSV",
+                data=csv,
+                file_name=f"passport_data_{st.session_state.airline_format.lower()}.csv",
+                mime="text/csv",
+            )
+        
+        with col2:
+            # Create an in-memory Excel file
+            from io import BytesIO
+            output = BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                st.session_state.results_df.to_excel(writer, index=False, sheet_name='PassportData')
+            
+            st.download_button(
+                label="Download data as Excel",
+                data=output.getvalue(),
+                file_name=f"passport_data_{st.session_state.airline_format.lower()}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        
+        with col3:
+            if st.button("Clear Results"):
+                st.session_state.results_df = None
+                st.session_state.airline_format = None
+                st.rerun()
+    
     if uploaded_files and not st.session_state.processing:
         if st.button("Extract Data"):
             st.session_state.processing = True
@@ -269,21 +311,35 @@ def main():
                     print(f"DEBUG: Problematic: {problem['file_name']} - {problem['issue']}")
 
                 # Show results only after all processing is complete
-                successful_files = len(set(result.get('source_file', '') for result in all_results))
+                successful_files = len(set(result.get('source_file', '') for result in good_results))
                 st.success(f"📋 Extracted data of {successful_files} files")
 
-                if not all_results:
+                if not good_results:
                     st.warning("No data could be extracted. Please check the files or try again.")
                     st.session_state.processing = False
+                    st.session_state.results_df = None
+                    st.session_state.airline_format = None
                     return
 
+                # Filter out problematic results from all_results
+                good_results = []
+                for result in all_results:
+                    # Check if this result belongs to a problematic file
+                    is_problematic = any(problem['file_name'] == result.get('source_file') for problem in problematic_files)
+                    if not is_problematic:
+                        good_results.append(result)
+                
                 # Format data based on airline selection
                 if airline == "Iraqi Airways":
-                    df = format_iraqi_airways(all_results)
+                    df = format_iraqi_airways(good_results)
                 elif airline == "Flydubai":
-                    df = format_flydubai(all_results)
+                    df = format_flydubai(good_results)
                 else:
-                    df = pd.DataFrame(all_results)
+                    df = pd.DataFrame(good_results)
+
+                # Store results in session state
+                st.session_state.results_df = df
+                st.session_state.airline_format = airline
 
                 # Display the results table
                 st.dataframe(df)
