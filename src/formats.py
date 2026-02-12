@@ -121,18 +121,23 @@ def format_flydubai(data_list):
         
         first_middle = item.get('name', '')
         
-        # Get raw date data for age calculation (in DD/MM/YYYY format)
+        # Get date data for age calculation
         raw_dob = item.get('date_of_birth', '')
         raw_expiry = item.get('expiration_date', '')
         
-        # Calculate passenger type based on age using DD/MM/YYYY format
-        # First convert MRZ date (YYMMDD) to DD/MM/YYYY for age calculation
+        # Calculate passenger type based on age
+        # The date might be in DDMMMYY format (18NOV16) or YYMMDD format (161118)
         ddmmyyyy_dob = ''
-        if raw_dob and len(raw_dob) == 6:  # YYMMDD format
+        if raw_dob:
             try:
-                from datetime import datetime
-                mrz_date = datetime.strptime(raw_dob, '%y%m%d').date()
-                ddmmyyyy_dob = mrz_date.strftime('%d/%m/%Y')
+                # First try YYMMDD format (MRZ raw format) - 6 chars
+                if len(raw_dob) == 6:
+                    mrz_date = datetime.strptime(raw_dob, '%y%m%d').date()
+                    ddmmyyyy_dob = mrz_date.strftime('%d/%m/%Y')
+                else:
+                    # Try DDMMMYY format (already formatted) - 7+ chars
+                    formatted_date = datetime.strptime(raw_dob, '%d%b%y').date()
+                    ddmmyyyy_dob = formatted_date.strftime('%d/%m/%Y')
             except:
                 ddmmyyyy_dob = raw_dob
         else:
@@ -140,9 +145,9 @@ def format_flydubai(data_list):
             
         _, ptc_code = calculate_passenger_type(ddmmyyyy_dob)
         
-        # Format dates to DDMMMYY for output
-        dob_formatted = _to_ddmmmyy(raw_dob)
-        expiry_formatted = _to_ddmmmyy(raw_expiry)
+        # Use the dates as-is since they're already formatted
+        dob_formatted = raw_dob
+        expiry_formatted = raw_expiry
         
         row = {
             "Last Name": item.get('surname', ''),
