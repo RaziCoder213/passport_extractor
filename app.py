@@ -370,7 +370,7 @@ def main():
                 
                 # Display success/failure summary
                 if failed_files > 0:
-                    st.warning(f"⚠️ {successful_files}/{total_files} passports were successfully imported")
+                    st.warning(f"⚠️ {successful_files}/{total_files} passports were successfully extracted")
                     
                     # Show detailed list of failed passports
                     with st.expander("📋 Click to see failed passport details"):
