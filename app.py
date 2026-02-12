@@ -310,6 +310,14 @@ def main():
                 for problem in problematic_files:
                     print(f"DEBUG: Problematic: {problem['file_name']} - {problem['issue']}")
 
+                # Filter out problematic results from all_results
+                good_results = []
+                for result in all_results:
+                    # Check if this result belongs to a problematic file
+                    is_problematic = any(problem['file_name'] == result.get('source_file') for problem in problematic_files)
+                    if not is_problematic:
+                        good_results.append(result)
+
                 # Show results only after all processing is complete
                 successful_files = len(set(result.get('source_file', '') for result in good_results))
                 st.success(f"📋 Extracted data of {successful_files} files")
@@ -320,14 +328,6 @@ def main():
                     st.session_state.results_df = None
                     st.session_state.airline_format = None
                     return
-
-                # Filter out problematic results from all_results
-                good_results = []
-                for result in all_results:
-                    # Check if this result belongs to a problematic file
-                    is_problematic = any(problem['file_name'] == result.get('source_file') for problem in problematic_files)
-                    if not is_problematic:
-                        good_results.append(result)
                 
                 # Format data based on airline selection
                 if airline == "Iraqi Airways":
