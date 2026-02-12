@@ -62,14 +62,28 @@ def format_iraqi_airways(data_list):
         title = "MR" if sex == 'M' else "MRS"
         
         # Calculate passenger type based on age
-        passenger_type, _ = calculate_passenger_type(item.get('date_of_birth', ''))
+        raw_dob = item.get('date_of_birth', '')
+        
+        # Convert MRZ date (YYMMDD) to DD/MM/YYYY for age calculation
+        ddmmyyyy_dob = ''
+        if raw_dob and len(raw_dob) == 6:  # YYMMDD format
+            try:
+                from datetime import datetime
+                mrz_date = datetime.strptime(raw_dob, '%y%m%d').date()
+                ddmmyyyy_dob = mrz_date.strftime('%d/%m/%Y')
+            except:
+                ddmmyyyy_dob = raw_dob
+        else:
+            ddmmyyyy_dob = raw_dob
+            
+        passenger_type, _ = calculate_passenger_type(ddmmyyyy_dob)
         
         row = {
             "TYPE": passenger_type,
             "TITLE": title,
             "FIRST NAME": item.get('name', ''),
             "LAST NAME": item.get('surname', ''),
-            "DOB (DD/MM/YYYY)": item.get('date_of_birth', ''),
+            "DOB (DD/MM/YYYY)": ddmmyyyy_dob,
             "GENDER": gender_full
         }
         formatted_rows.append(row)
