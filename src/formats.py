@@ -161,7 +161,7 @@ def format_flydubai(data_list):
             "Passport Middle Name": "",
             "Passport Number": item.get('passport_number', ''),
             "Passport Nationality": item.get('nationality', '')[:3],
-            "Passport Issue Country": item.get('issuing_country', '')[:3],
+            "Passport Issue Country": item.get('country', '')[:3],
             "Passport Expiry Date": expiry_formatted,
             # Empty fields
             "Visa Number": "", "Visa Type": "", "Visa Issue Date": "", "Place of Birth": "",
