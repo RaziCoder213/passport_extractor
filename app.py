@@ -155,48 +155,75 @@ def main():
         st.session_state.results_df = None
     if 'airline_format' not in st.session_state:
         st.session_state.airline_format = None
+    if 'download_counter' not in st.session_state:
+        st.session_state.download_counter = 0
+    if 'show_results' not in st.session_state:
+        st.session_state.show_results = False
+    if 'clear_and_extract' not in st.session_state:
+        st.session_state.clear_and_extract = False
 
-    # Display existing results if available
-    if st.session_state.results_df is not None:
-        st.subheader("📊 Extracted Data")
-        st.dataframe(st.session_state.results_df)
-        
-        # Show export options for existing results
-        st.subheader("📥 Export Data")
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            csv = st.session_state.results_df.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="Download data as CSV",
-                data=csv,
-                file_name=f"passport_data_{st.session_state.airline_format.lower()}.csv",
-                mime="text/csv",
-            )
-        
-        with col2:
-            # Create an in-memory Excel file
-            from io import BytesIO
-            output = BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                st.session_state.results_df.to_excel(writer, index=False, sheet_name='PassportData')
+    # Create a container for results - this will be cleared when new extraction starts
+    results_container = st.container()
+    
+    # Display existing results if available and not processing
+    if st.session_state.results_df is not None and not st.session_state.processing and st.session_state.show_results:
+        with results_container:
+            st.subheader("📊 Extracted Data")
+            st.dataframe(st.session_state.results_df)
             
-            st.download_button(
-                label="Download data as Excel",
-                data=output.getvalue(),
-                file_name=f"passport_data_{st.session_state.airline_format.lower()}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            )
-        
-        with col3:
-            if st.button("Clear Results"):
-                st.session_state.results_df = None
-                st.session_state.airline_format = None
-                st.rerun()
+            # Show export options for existing results
+            st.subheader("📥 Export Data")
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                csv = st.session_state.results_df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="Download data as CSV",
+                    data=csv,
+                    file_name=f"passport_data_{st.session_state.airline_format.lower()}.csv",
+                    mime="text/csv",
+                    key=f"existing_csv_{st.session_state.download_counter}"
+                )
+            
+            with col2:
+                # Create an in-memory Excel file
+                from io import BytesIO
+                output = BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    st.session_state.results_df.to_excel(writer, index=False, sheet_name='PassportData')
+                
+                st.download_button(
+                    label="Download data as Excel",
+                    data=output.getvalue(),
+                    file_name=f"passport_data_{st.session_state.airline_format.lower()}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key=f"existing_excel_{st.session_state.download_counter}"
+                )
+            
+            with col3:
+                if st.button("Clear Results"):
+                    st.session_state.results_df = None
+                    st.session_state.airline_format = None
+                    st.session_state.show_results = False
+                    st.rerun()
     
     if uploaded_files and not st.session_state.processing:
         if st.button("Extract Data"):
+            # First, clear results like Clear Results button does
+            st.session_state.results_df = None
+            st.session_state.airline_format = None
+            st.session_state.show_results = False
+            st.session_state.download_counter += 1
+            st.session_state.clear_and_extract = True
+            
+            # Force immediate UI update to clear old results
+            st.rerun()
+            
+        # Check if we need to start extraction after clearing
+        if st.session_state.clear_and_extract:
+            st.session_state.clear_and_extract = False
             st.session_state.processing = True
+            
             try:
                 # Initialize extractor inside the button click to use the latest settings
                 extractor = PassportExtractor(use_gpu=True)
@@ -337,14 +364,7 @@ def main():
                 else:
                     df = pd.DataFrame(good_results)
 
-                # Store results in session state
-                st.session_state.results_df = df
-                st.session_state.airline_format = airline
-
-                # Display the results table
-                st.dataframe(df)
-                
-                # Prepare export dataframe based on sidebar setting
+                # If export_all_files is checked, add placeholder data to display table
                 if st.session_state.export_all_files and problematic_files:
                     # Create placeholder data that matches the airline format
                     placeholder_data = []
@@ -374,7 +394,6 @@ def main():
                                 "Passport Nationality": "•••",
                                 "Passport Issue Country": "•••",
                                 "Passport Expiry Date": "•••",
-                                # Empty fields for Flydubai
                                 "Visa Number": "", "Visa Type": "", "Visa Issue Date": "", "Place of Birth": "",
                                 "Visa Place of Issue": "", "Visa Country of Application": "", "Address Type": "",
                                 "Address Country": "", "Address Details": "", "Address City": "",
@@ -394,13 +413,21 @@ def main():
                                 'mrz_found': False
                             })
                     
-                    # Combine successful and placeholder data
                     if placeholder_data:
                         placeholder_df = pd.DataFrame(placeholder_data)
-                        export_df = pd.concat([df, placeholder_df], ignore_index=True)
-                    else:
-                        export_df = df
-                else:
+                        df = pd.concat([df, placeholder_df], ignore_index=True)
+
+                # Store results in session state
+                st.session_state.results_df = df
+                st.session_state.airline_format = airline
+                st.session_state.show_results = True
+
+                # Display results in the container
+                with results_container:
+                    st.subheader("📊 Extracted Data")
+                    st.dataframe(df)
+                    
+                    # Prepare export dataframe (same as display dataframe now)
                     export_df = df
                 
                 # Download buttons - now export_df is guaranteed to be defined
@@ -413,6 +440,7 @@ def main():
                         data=csv,
                         file_name=f"passport_data_{airline.lower()}.csv",
                         mime="text/csv",
+                        key=f"csv_download_{airline}_{st.session_state.get('download_counter', 0)}"
                     )
                 
                 with col2:
@@ -427,7 +455,11 @@ def main():
                         data=output.getvalue(),
                         file_name=f"passport_data_{airline.lower()}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key=f"excel_download_{airline}_{st.session_state.get('download_counter', 0)}"
                     )
+                
+                # Increment counter for next extraction to avoid duplicate IDs
+                st.session_state.download_counter += 1
                 
                 # Reset processing state
                 st.session_state.processing = False
