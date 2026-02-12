@@ -135,7 +135,7 @@ def main():
     # Export settings - simplified
     st.sidebar.header("Export Settings")
     export_all_files = st.sidebar.checkbox(
-        "Include all files in export",
+        "Include all files",
         value=False,
         help="When checked, includes files with missing/invalid data (shows ••• for missing fields)"
     )
