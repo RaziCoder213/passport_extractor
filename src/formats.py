@@ -1,8 +1,51 @@
 import pandas as pd
 import os
 import logging
+from datetime import datetime, date
 
 logger = logging.getLogger(__name__)
+
+def calculate_passenger_type(dob_str):
+    """
+    Calculate passenger type based on age from date of birth.
+    
+    Age groups:
+    - Infants: 0-1 year (0-11 months)
+    - Children: 1-12 years (12 months to 12 years)
+    - Adults: 12+ years
+    
+    Returns:
+        For Iraqi Airways: "Infant", "Child", "Adult"
+        For Flydubai: "INF", "CHD", "ADT"
+    """
+    if not dob_str:
+        return "Adult", "ADT"  # Default to adult if no DOB
+    
+    try:
+        # Parse the date (assuming DD/MM/YYYY format)
+        dob = datetime.strptime(dob_str, '%d/%m/%Y').date()
+        today = date.today()
+        
+        # Calculate age in years
+        age_years = today.year - dob.year
+        if today.month < dob.month or (today.month == dob.month and today.day < dob.day):
+            age_years -= 1
+        
+        # Calculate age in months for more accurate infant check
+        age_months = (today.year - dob.year) * 12 + (today.month - dob.month)
+        if today.day < dob.day:
+            age_months -= 1
+        
+        # Determine passenger type based on age
+        if age_months < 12:  # Less than 12 months - Infant
+            return "Infant", "INF"
+        elif age_years < 12:  # 1-11 years - Child
+            return "Child", "CHD"
+        else:  # 12+ years - Adult
+            return "Adult", "ADT"
+            
+    except (ValueError, TypeError):
+        return "Adult", "ADT"  # Default to adult if date parsing fails
 
 def format_iraqi_airways(data_list):
     """
@@ -18,8 +61,11 @@ def format_iraqi_airways(data_list):
         gender_full = "Male" if sex == 'M' else "Female"
         title = "MR" if sex == 'M' else "MRS"
         
+        # Calculate passenger type based on age
+        passenger_type, _ = calculate_passenger_type(item.get('date_of_birth', ''))
+        
         row = {
-            "TYPE": "Adult", # Default
+            "TYPE": passenger_type,
             "TITLE": title,
             "FIRST NAME": item.get('name', ''),
             "LAST NAME": item.get('surname', ''),
@@ -65,11 +111,14 @@ def format_flydubai(data_list):
         dob_formatted = _to_ddmmmyy(item.get('date_of_birth', ''))
         expiry_formatted = _to_ddmmmyy(item.get('expiration_date', ''))
         
+        # Calculate passenger type based on age
+        _, ptc_code = calculate_passenger_type(item.get('date_of_birth', ''))
+        
         row = {
             "Last Name": item.get('surname', ''),
             "First Name and Middle Name": first_middle,
             "Title": title,
-            "PTC": "ADT", # Default to Adult
+            "PTC": ptc_code, # Passenger Type Code based on age
             "Gender": sex,
             "Date of Birth": dob_formatted,
             "Passport Last Name": item.get('surname', ''),
