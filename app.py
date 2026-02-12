@@ -122,7 +122,9 @@ def main():
     
     # Add a description
     st.markdown("""
-   Note: Please ensure that a clear and clean copy of the passport is used. Blurry images or dots/marks on the MRZ (Machine Readable Zone) may result in incorrect data extraction.
+    This tool extracts data from passport MRZ (Machine-Readable Zone) codes. 
+    Upload passport images or PDFs, and the app will return a structured table of the extracted information. 
+    You can also select an airline-specific format for the output data.
     """)
 
     # Sidebar Configuration
@@ -268,7 +270,7 @@ def main():
 
                 # Show results only after all processing is complete
                 successful_files = len(set(result.get('source_file', '') for result in all_results))
-                st.success(f"📋 Extracted data all files")
+                st.success(f"📋 Extracted data of {successful_files} files")
 
                 if not all_results:
                     st.warning("No data could be extracted. Please check the files or try again.")
@@ -288,21 +290,53 @@ def main():
                 
                 # Prepare export dataframe based on sidebar setting
                 if st.session_state.export_all_files and problematic_files:
-                    # Create dataframe with placeholder data for problematic files
+                    # Create placeholder data that matches the airline format
                     placeholder_data = []
+                    
                     for problem in problematic_files:
-                        placeholder_data.append({
-                            'source_file': problem['file_name'],
-                            'surname': '•••',
-                            'given_names': '•••',
-                            'passport_number': '•••',
-                            'nationality': '•••',
-                            'date_of_birth': '•••',
-                            'sex': '•••',
-                            'expiration_date': '•••',
-                            'personal_number': '•••',
-                            'mrz_found': False
-                        })
+                        if airline == "Iraqi Airways":
+                            placeholder_data.append({
+                                "TYPE": "Adult",  # Default for problematic files
+                                "TITLE": "MR",
+                                "FIRST NAME": "•••",
+                                "LAST NAME": "•••",
+                                "DOB (DD/MM/YYYY)": "•••",
+                                "GENDER": "Male"
+                            })
+                        elif airline == "Flydubai":
+                            placeholder_data.append({
+                                "Last Name": "•••",
+                                "First Name and Middle Name": "•••",
+                                "Title": "MR",
+                                "PTC": "ADT",  # Default to Adult
+                                "Gender": "M",
+                                "Date of Birth": "•••",
+                                "Passport Last Name": "•••",
+                                "Passport First Name": "•••",
+                                "Passport Middle Name": "",
+                                "Passport Number": "•••",
+                                "Passport Nationality": "•••",
+                                "Passport Issue Country": "•••",
+                                "Passport Expiry Date": "•••",
+                                # Empty fields for Flydubai
+                                "Visa Number": "", "Visa Type": "", "Visa Issue Date": "", "Place of Birth": "",
+                                "Visa Place of Issue": "", "Visa Country of Application": "", "Address Type": "",
+                                "Address Country": "", "Address Details": "", "Address City": "",
+                                "Address State": "", "Address Zip Code": ""
+                            })
+                        else:  # Default format
+                            placeholder_data.append({
+                                'source_file': problem['file_name'],
+                                'surname': '•••',
+                                'given_names': '•••',
+                                'passport_number': '•••',
+                                'nationality': '•••',
+                                'date_of_birth': '•••',
+                                'sex': '•••',
+                                'expiration_date': '•••',
+                                'personal_number': '•••',
+                                'mrz_found': False
+                            })
                     
                     # Combine successful and placeholder data
                     if placeholder_data:
