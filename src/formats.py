@@ -11,8 +11,8 @@ def calculate_passenger_type(dob_str):
     
     Age groups:
     - Infants: 0-1 year (0-11 months)
-    - Children: 1-12 years (12 months to 12 years)
-    - Adults: 12+ years
+    - Children: 1-17 years
+    - Adults: 18+ years
     
     Returns:
         For Iraqi Airways: "Infant", "Child", "Adult"
@@ -39,9 +39,9 @@ def calculate_passenger_type(dob_str):
         # Determine passenger type based on age
         if age_months < 12:  # Less than 12 months - Infant
             return "Infant", "INF"
-        elif age_years < 12:  # 1-11 years - Child
+        elif age_years < 18:  # 1-17 years - Child
             return "Child", "CHD"
-        else:  # 12+ years - Adult
+        else:  # 18+ years - Adult
             return "Adult", "ADT"
             
     except (ValueError, TypeError):
@@ -107,12 +107,28 @@ def format_flydubai(data_list):
         
         first_middle = item.get('name', '')
         
-        # Format dates
-        dob_formatted = _to_ddmmmyy(item.get('date_of_birth', ''))
-        expiry_formatted = _to_ddmmmyy(item.get('expiration_date', ''))
+        # Get raw date data for age calculation (in DD/MM/YYYY format)
+        raw_dob = item.get('date_of_birth', '')
+        raw_expiry = item.get('expiration_date', '')
         
-        # Calculate passenger type based on age
-        _, ptc_code = calculate_passenger_type(item.get('date_of_birth', ''))
+        # Calculate passenger type based on age using DD/MM/YYYY format
+        # First convert MRZ date (YYMMDD) to DD/MM/YYYY for age calculation
+        ddmmyyyy_dob = ''
+        if raw_dob and len(raw_dob) == 6:  # YYMMDD format
+            try:
+                from datetime import datetime
+                mrz_date = datetime.strptime(raw_dob, '%y%m%d').date()
+                ddmmyyyy_dob = mrz_date.strftime('%d/%m/%Y')
+            except:
+                ddmmyyyy_dob = raw_dob
+        else:
+            ddmmyyyy_dob = raw_dob
+            
+        _, ptc_code = calculate_passenger_type(ddmmyyyy_dob)
+        
+        # Format dates to DDMMMYY for output
+        dob_formatted = _to_ddmmmyy(raw_dob)
+        expiry_formatted = _to_ddmmmyy(raw_expiry)
         
         row = {
             "Last Name": item.get('surname', ''),
