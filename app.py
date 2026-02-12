@@ -135,7 +135,7 @@ def main():
     # Export settings - simplified
     st.sidebar.header("Export Settings")
     export_all_files = st.sidebar.checkbox(
-        "Include all files",
+        "Include all files in export",
         value=False,
         help="When checked, includes files with missing/invalid data (shows ••• for missing fields)"
     )
@@ -250,11 +250,19 @@ def main():
                         file_size = len(file.getvalue())
                         if file_size > 10 * 1024 * 1024:  # 10 MB
                             st.error(f"❌ File too large: {file.name} ({file_size / (1024*1024):.1f} MB). Max 10 MB allowed.")
+                            problematic_files.append({
+                                'file_name': file.name,
+                                'reason': f'File too large ({file_size / (1024*1024):.1f} MB). Max 10 MB allowed.'
+                            })
                             with progress_container:
                                 main_progress_bar.progress((i + 1) / len(uploaded_files))
                             continue
                     except Exception as e:
                         st.error(f"❌ Error checking file size for {file.name}: {str(e)}")
+                        problematic_files.append({
+                            'file_name': file.name,
+                            'reason': f'Error checking file size: {str(e)}'
+                        })
                         with progress_container:
                             main_progress_bar.progress((i + 1) / len(uploaded_files))
                         continue
@@ -299,10 +307,20 @@ def main():
                         all_results.extend(results)
                         
                         # Track problematic files - check if MRZ was found OR if no results
-                        if not file_processed or not results or not mrz_found_in_file:
+                        if not file_processed:
                             problematic_files.append({
                                 'file_name': file.name,
-                                'issue': 'No MRZ data found - image may be blurry or passport not detected'
+                                'reason': 'File could not be processed - unsupported format or corrupted file'
+                            })
+                        elif not results:
+                            problematic_files.append({
+                                'file_name': file.name,
+                                'reason': 'No passport data detected - image may be blurry or passport not visible'
+                            })
+                        elif not mrz_found_in_file:
+                            problematic_files.append({
+                                'file_name': file.name,
+                                'reason': 'MRZ data not found - passport may be damaged or partially visible'
                             })
                             # Debug output
                             print(f"DEBUG: Added problematic file: {file.name} (file_processed: {file_processed}, results: {len(results)}, mrz_found: {mrz_found_in_file})")
@@ -311,7 +329,7 @@ def main():
                         # Track files that caused errors
                         problematic_files.append({
                             'file_name': file.name,
-                            'issue': f'Processing error: {str(e)}'
+                            'reason': f'Processing error: {str(e)}'
                         })
                         pass
                         
@@ -347,7 +365,27 @@ def main():
 
                 # Show results only after all processing is complete
                 successful_files = len(set(result.get('source_file', '') for result in good_results))
-                st.success(f"📋 Extracted data of {successful_files} files")
+                total_files = len(uploaded_files)
+                failed_files = total_files - successful_files
+                
+                # Display success/failure summary
+                if failed_files > 0:
+                    st.warning(f"⚠️ {successful_files}/{total_files} passports were successfully imported")
+                    
+                    # Show detailed list of failed passports
+                    with st.expander("📋 Click to see failed passport details"):
+                        st.write("**Failed Passports:**")
+                        for problem in problematic_files:
+                            st.write(f"• {problem['file_name']} - {problem['reason']}")
+                else:
+                    st.success(f"✅ All {successful_files} passports were successfully imported")
+
+                if not good_results:
+                    st.warning("No data could be extracted. Please check the files or try again.")
+                    st.session_state.processing = False
+                    st.session_state.results_df = None
+                    st.session_state.airline_format = None
+                    return
 
                 if not good_results:
                     st.warning("No data could be extracted. Please check the files or try again.")
