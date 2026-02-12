@@ -152,3 +152,4 @@ def parse_barcode_data(barcode_data):
     except Exception as e:
         logger.error(f"Error parsing barcode data: {e}")
         return None
+        
