@@ -140,7 +140,7 @@ class PassportExtractor:
     # ---------------------------------------------------
     # MAIN DATA FUNCTION
     # ---------------------------------------------------
-    def get_data(self, img_path, airline="flydubai"):
+    def get_data(self, img_path, airline="iraqi"):
 
         if not os.path.exists(img_path):
             logger.error(f"File not found: {img_path}")
@@ -203,7 +203,7 @@ class PassportExtractor:
     # ---------------------------------------------------
     # PDF PROCESSING
     # ---------------------------------------------------
-    def process_pdf(self, pdf_path, progress_callback=None, airline="flydubai"):
+    def process_pdf(self, pdf_path, progress_callback=None, airline="iraqi"):
         """
         Memory-safe PDF processing for Streamlit free tier with fallback support.
         Converts PDF pages to images and extracts passport data from each page.
@@ -211,7 +211,7 @@ class PassportExtractor:
         Args:
             pdf_path (str): Path to the PDF file.
             progress_callback (function, optional): Progress callback function.
-            airline (str): Airline format for date formatting ("flydubai", "default", "iraqi airways").
+            airline (str): Airline format for date formatting ("iraqi", "default", "fly dubai", "fly baghdad").
             
         Returns:
             list: List of dictionaries with extracted passport data per page.

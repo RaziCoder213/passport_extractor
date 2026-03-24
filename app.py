@@ -10,17 +10,17 @@ import pandas as pd
 import time
 from src.extractor import PassportExtractor
 from src.validators import validate_passport_data
-from src.formats import format_iraqi_airways, format_flydubai
+from src.formats import format_fly_dubai, format_iraqi, format_fly_baghdad
 from src.utils import parse_date
 
 
-def process_pdf_file(uploaded_file, airline="flydubai"):
+def process_pdf_file(uploaded_file, airline="iraqi"):
     """
     Process a single uploaded PDF file and extract passport data.
 
     Args:
         uploaded_file: Uploaded file object (Streamlit or similar)
-        airline (str): Airline format for date formatting ("flydubai", "default", "iraqi airways")
+        airline (str): Airline format for date formatting ("iraqi", "default", "fly dubai", "fly baghdad")
 
     Returns:
         List[dict]: Extracted passport data for each page/passport
@@ -130,7 +130,7 @@ def main():
     # Sidebar Configuration
     st.sidebar.header("Settings")
     st.sidebar.info("💡 Optimized for performance - GPU enabled")
-    airline = st.sidebar.selectbox("Choose Airline Format", ["Default", "Iraqi Airways", "Flydubai"])
+    airline = st.sidebar.selectbox("Choose Airline Format", ["Default", "Fly Dubai", "Iraqi", "Fly Baghdad"])
     
     # Export settings - simplified
     st.sidebar.header("Export Settings")
@@ -409,10 +409,12 @@ def main():
                     return
                 
                 # Format data based on airline selection
-                if airline == "Iraqi Airways":
-                    df = format_iraqi_airways(good_results)
-                elif airline == "Flydubai":
-                    df = format_flydubai(good_results)
+                if airline == "Fly Dubai":
+                    df = format_fly_dubai(good_results)
+                elif airline == "Iraqi":
+                    df = format_iraqi(good_results)
+                elif airline == "Fly Baghdad":
+                    df = format_fly_baghdad(good_results)
                 else:
                     df = pd.DataFrame(good_results)
 
@@ -422,7 +424,7 @@ def main():
                     placeholder_data = []
                     
                     for problem in problematic_files:
-                        if airline == "Iraqi Airways":
+                        if airline == "Fly Dubai":
                             placeholder_data.append({
                                 "TYPE": "Adult",  # Default for problematic files
                                 "TITLE": "MR",
@@ -431,7 +433,7 @@ def main():
                                 "DOB (DD/MM/YYYY)": "•••",
                                 "GENDER": "Male"
                             })
-                        elif airline == "Flydubai":
+                        elif airline == "Iraqi":
                             placeholder_data.append({
                                 "Last Name": "•••",
                                 "First Name and Middle Name": "•••",
@@ -450,6 +452,21 @@ def main():
                                 "Visa Place of Issue": "", "Visa Country of Application": "", "Address Type": "",
                                 "Address Country": "", "Address Details": "", "Address City": "",
                                 "Address State": "", "Address Zip Code": ""
+                            })
+                        elif airline == "Fly Baghdad":
+                            placeholder_data.append({
+                                "Sequence": len(good_results) + len(placeholder_data) + 1,
+                                "Traveling With": "",
+                                "Pax Type": "ADT",
+                                "Title": "MR",
+                                "First Name": "•••",
+                                "Last Name": "•••",
+                                "Gender": "MALE",
+                                "DOB (dd/mm/yyyy)": "•••",
+                                "Nationality": "•••",
+                                "Passport Number": "•••",
+                                "Passport Expiry (dd/mm/yyyy)": "•••",
+                                "Passport Issued Country": "•••"
                             })
                         else:  # Default format
                             placeholder_data.append({

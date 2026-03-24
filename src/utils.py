@@ -18,17 +18,17 @@ def setup_logger(name=__name__):
 
 logger = setup_logger(__name__)
 
-def parse_date(date_obj, airline="flydubai"):
+def parse_date(date_obj, airline="iraqi"):
     """Parses a date object or string based on airline format requirements."""
     try:
         date_str = date_obj.isoformat() if hasattr(date_obj, 'isoformat') else str(date_obj)
         date = parser.parse(date_str, yearfirst=True).date()
         
-        if airline.lower() == "flydubai":
-            # Flydubai format: DDMMMYY (e.g., 13NOV84)
+        if airline.lower() == "iraqi":
+            # Iraqi format (previously Flydubai): DDMMMYY (e.g., 13NOV84)
             return date.strftime('%d%b%y').upper()
         else:
-            # Default and Iraqi Airways format: DD/MM/YYYY (e.g., 12/1/2023)
+            # Default, Fly Dubai and Fly Baghdad format: DD/MM/YYYY (e.g., 12/1/2023)
             return date.strftime('%d/%m/%Y')
             
     except (ValueError, TypeError) as e:

@@ -1,7 +1,7 @@
 
 import unittest
 import pandas as pd
-from src.formats import format_iraqi_airways, format_flydubai
+from src.formats import format_fly_dubai, format_iraqi, format_fly_baghdad
 
 class TestFormats(unittest.TestCase):
     def setUp(self):
@@ -11,9 +11,9 @@ class TestFormats(unittest.TestCase):
                 'name': 'FATIMA',
                 'sex': 'F',
                 'date_of_birth': '13/11/1984',
-                'nationality': 'PAKISTAN',
+                'nationality': 'PAK',
+                'country': 'PAK',
                 'passport_number': 'BD1204714',
-                'issuing_country': 'PAKISTAN',
                 'expiration_date': '12/06/2033'
             }
         ]
@@ -24,16 +24,16 @@ class TestFormats(unittest.TestCase):
                 'name': 'ASMAT',
                 'sex': 'M',
                 'date_of_birth': '13/08/2015',
-                'nationality': 'PAKISTAN',
+                'nationality': 'PAK',
+                'country': 'PAK',
                 'passport_number': 'AB123456',
-                'issuing_country': 'PAKISTAN',
                 'expiration_date': '12/06/2025'
             }
         ]
 
-    def test_iraqi_airways_format(self):
-        # Now Iraqi Airways uses the simple format (TYPE, TITLE...) based on user feedback
-        df = format_iraqi_airways(self.sample_data)
+    def test_fly_dubai_format(self):
+        # Now Fly Dubai uses the simple format (TYPE, TITLE...)
+        df = format_fly_dubai(self.sample_data)
         
         # Check columns
         expected_cols = ["TYPE", "TITLE", "FIRST NAME", "LAST NAME", "DOB (DD/MM/YYYY)", "GENDER"]
@@ -47,9 +47,9 @@ class TestFormats(unittest.TestCase):
         self.assertEqual(row['FIRST NAME'], 'FATIMA')
         self.assertEqual(row['LAST NAME'], 'AMIN')
         
-    def test_flydubai_format(self):
-        # Now Flydubai uses the complex format (Last Name, First Name and Middle Name...)
-        df = format_flydubai(self.sample_data_male)
+    def test_iraqi_format(self):
+        # Now Iraqi uses the complex format (Last Name, First Name and Middle Name...)
+        df = format_iraqi(self.sample_data_male)
         
         # Check columns
         expected_cols = ["Last Name", "First Name and Middle Name", "Title", "PTC", "Gender"]
@@ -63,6 +63,25 @@ class TestFormats(unittest.TestCase):
         self.assertEqual(row['Title'], 'MR')
         self.assertEqual(row['Gender'], 'M')
         self.assertEqual(row['Passport Number'], 'AB123456')
+
+    def test_fly_baghdad_format(self):
+        # Fly Baghdad format
+        df = format_fly_baghdad(self.sample_data_male)
+        
+        # Check columns
+        expected_cols = ["Sequence", "Pax Type", "Title", "First Name", "Last Name", "Gender", "DOB (dd/mm/yyyy)", "Nationality", "Passport Number", "Passport Expiry (dd/mm/yyyy)", "Passport Issued Country"]
+        for col in expected_cols:
+            self.assertIn(col, df.columns)
+            
+        # Check Values
+        row = df.iloc[0]
+        self.assertEqual(row['Sequence'], 1)
+        self.assertEqual(row['Last Name'], 'KHAN')
+        self.assertEqual(row['First Name'], 'ASMAT')
+        self.assertEqual(row['Title'], 'MR')
+        self.assertEqual(row['Gender'], 'MALE')
+        self.assertEqual(row['Nationality'], 'PAKISTAN')
+        self.assertEqual(row['Passport Issued Country'], 'PAKISTAN')
 
 if __name__ == '__main__':
     unittest.main()

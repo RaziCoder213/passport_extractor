@@ -15,8 +15,8 @@ def calculate_passenger_type(dob_str):
     - Adults: 18+ years
     
     Returns:
-        For Iraqi Airways: "Infant", "Child", "Adult"
-        For Flydubai: "INF", "CHD", "ADT"
+        For Fly Dubai: "Infant", "Child", "Adult"
+        For Iraqi/Fly Baghdad: "INF", "CHD", "ADT"
     """
     if not dob_str:
         return "Adult", "ADT"  # Default to adult if no DOB
@@ -47,9 +47,9 @@ def calculate_passenger_type(dob_str):
     except (ValueError, TypeError):
         return "Adult", "ADT"  # Default to adult if date parsing fails
 
-def format_iraqi_airways(data_list):
+def format_fly_dubai(data_list):
     """
-    Formats data for Iraqi Airways template.
+    Formats data for Fly Dubai template (previously Iraqi Airways).
     Columns: TYPE, TITLE, FIRST NAME, LAST NAME, DOB (DD/MM/YYYY), GENDER
     Example: Adult MR FirstNameOne LastNameOne 13/8/2015 Male
     """
@@ -107,9 +107,9 @@ def _to_ddmmmyy(date_str):
     except ValueError:
         return date_str # Return original if parsing fails
 
-def format_flydubai(data_list):
+def format_iraqi(data_list):
     """
-    Formats data for Flydubai template.
+    Formats data for Iraqi template (previously Flydubai).
     - Date of Birth: DDMMMYY (e.g., 13NOV84)
     - Passport Expiry Date: DDMMMYY (e.g., 13NOV84)
     """
@@ -172,6 +172,77 @@ def format_flydubai(data_list):
         formatted_rows.append(row)
         
     return pd.DataFrame(formatted_rows)
+
+def format_fly_baghdad(data_list):
+    """
+    Formats data for Fly Baghdad template.
+    Columns: Sequence, Traveling With, Pax Type, Title, First Name, Last Name, Gender, 
+             DOB (dd/mm/yyyy), Nationality, Passport Number, Passport Expiry (dd/mm/yyyy), 
+             Passport Issued Country
+    """
+    from config.settings import COUNTRY_CODES
+    
+    # Create a mapping for quick lookup
+    country_map = {c['alpha-3']: c['name'].upper() for c in COUNTRY_CODES}
+    
+    formatted_rows = []
+    
+    for i, item in enumerate(data_list):
+        sex = item.get('sex', '').upper()
+        gender_full = "MALE" if sex == 'M' else "FEMALE"
+        title = "MR" if sex == 'M' else "MRS"
+        
+        # Get and format DOB
+        raw_dob = item.get('date_of_birth', '')
+        ddmmyyyy_dob = ''
+        if raw_dob and len(raw_dob) == 6:
+            try:
+                mrz_date = datetime.strptime(raw_dob, '%y%m%d').date()
+                ddmmyyyy_dob = mrz_date.strftime('%d/%m/%Y')
+            except:
+                ddmmyyyy_dob = raw_dob
+        else:
+            ddmmyyyy_dob = raw_dob
+            
+        # Get and format Expiry
+        raw_expiry = item.get('expiration_date', '')
+        ddmmyyyy_expiry = ''
+        if raw_expiry and len(raw_expiry) == 6:
+            try:
+                mrz_date = datetime.strptime(raw_expiry, '%y%m%d').date()
+                ddmmyyyy_expiry = mrz_date.strftime('%d/%m/%Y')
+            except:
+                ddmmyyyy_expiry = raw_expiry
+        else:
+            ddmmyyyy_expiry = raw_expiry
+            
+        _, ptc_code = calculate_passenger_type(ddmmyyyy_dob)
+        
+        # Map nationality and country
+        nat_code = item.get('nationality', '')[:3].upper()
+        country_code = item.get('country', '')[:3].upper()
+        
+        nationality = country_map.get(nat_code, nat_code)
+        issued_country = country_map.get(country_code, country_code)
+        
+        row = {
+            "Sequence": i + 1,
+            "Traveling With": "",
+            "Pax Type": ptc_code,
+            "Title": title,
+            "First Name": item.get('name', ''),
+            "Last Name": item.get('surname', ''),
+            "Gender": gender_full,
+            "DOB (dd/mm/yyyy)": ddmmyyyy_dob,
+            "Nationality": nationality,
+            "Passport Number": item.get('passport_number', ''),
+            "Passport Expiry (dd/mm/yyyy)": ddmmyyyy_expiry,
+            "Passport Issued Country": issued_country
+        }
+        formatted_rows.append(row)
+        
+    return pd.DataFrame(formatted_rows)
+
 
 def export_to_spreadsheet(data_list, output_file, format='excel'):
     """
