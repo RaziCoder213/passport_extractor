@@ -59,9 +59,9 @@ This tool requires `poppler` for PDF processing.
 Launch the easy-to-use web interface:
 
 ```bash
-streamlit run app.py
+python app.py
 ```
-This will open the tool in your default web browser (usually at `http://localhost:8501`). You can drag and drop files and download the results as Excel/CSV.
+This will open the tool in your default web browser (usually at `http://127.0.0.1:7860`). You can drag and drop files and download the results as Excel/CSV.
 
 ### 2. Command Line Interface (CLI)
 
@@ -96,7 +96,7 @@ passport-ocr-tool/
 │   └── formats.py        # Export handlers
 ├── config/
 │   └── settings.py       # Configuration
-├── app.py                # Streamlit Web App
+├── app.py                # Gradio Web App
 ├── main.py               # CLI Entry point
 └── ...
 ```
