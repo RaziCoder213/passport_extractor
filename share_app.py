@@ -3,17 +3,17 @@ import time
 import threading
 from pyngrok import ngrok
 
-def run_streamlit():
-    os.system("python3 -m streamlit run app.py")
+def run_gradio():
+    os.system("python app.py")
 
 def start_ngrok():
-    print("Starting Streamlit app...")
-    # Give streamlit a moment to start
+    print("Starting Gradio app...")
+    # Give the app a moment to start
     time.sleep(5)
     
     try:
-        # Open a HTTP tunnel on the default port 8501
-        public_url = ngrok.connect(8501).public_url
+        # Open a HTTP tunnel on Gradio default port 7860
+        public_url = ngrok.connect(7860).public_url
         print("\n" + "="*60)
         print(f"  \033[92m>>> YOUR LIVE LINK: {public_url} <<<\033[0m")
         print("  Share this link with your client. The app must stay running.")
@@ -29,8 +29,8 @@ def start_ngrok():
         print("3. Run: ngrok config add-authtoken <your_token>")
 
 if __name__ == "__main__":
-    # Start Streamlit in a separate thread
-    thread = threading.Thread(target=run_streamlit)
+    # Start Gradio app in a separate thread
+    thread = threading.Thread(target=run_gradio)
     thread.daemon = True
     thread.start()
 
